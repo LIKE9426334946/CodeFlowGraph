@@ -124,24 +124,3 @@ export function clientToSvg(
   if (!matrix) throw new Error("SVG 尚未显示");
   return new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
 }
-export function rectFromPoints(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-): Rect {
-  return {
-    x: Math.min(a.x, b.x),
-    y: Math.min(a.y, b.y),
-    width: Math.abs(a.x - b.x),
-    height: Math.abs(a.y - b.y),
-  };
-}
-export function unionRect(a: Rect, b: Rect): Rect {
-  const x = Math.min(a.x, b.x),
-    y = Math.min(a.y, b.y);
-  return {
-    x,
-    y,
-    width: Math.max(a.x + a.width, b.x + b.width) - x,
-    height: Math.max(a.y + a.height, b.y + b.height) - y,
-  };
-}

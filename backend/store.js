@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -8,353 +8,208 @@ export class HttpError extends Error {
     this.status = status;
   }
 }
-const fail = (message) => {
-  throw new HttpError(400, message);
-};
-const string = (v, max, field) =>
-  typeof v === "string" && v.length <= max
-    ? v
-    : fail(`${field} 格式无效或超过限制`);
-const number = (v, min, max, field) =>
-  typeof v === "number" && Number.isFinite(v) && v >= min && v <= max
-    ? v
-    : fail(`${field} 数值无效`);
-const integer = (v, min, max, field) =>
-  Number.isInteger(v)
-    ? number(v, min, max, field)
-    : fail(`${field} 必须为整数`);
-export const validId = (v) =>
-  typeof v === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(v);
-export function fileName(v, extension) {
-  string(v, 150, "文件名");
-  if (
-    !v.trim() ||
-    /[/\\\x00-\x1f]/.test(v) ||
-    v.startsWith(".") ||
-    !v.toLowerCase().endsWith(extension)
-  )
-    fail(`请选择有效的 ${extension} 文件名`);
-  return v;
+const validId = (value) =>
+  typeof value === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
+const readJSON = async (file) => JSON.parse(await fs.readFile(file, "utf8"));
+async function atomicJSON(file, value) {
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  const handle = await fs.open(temporary, "wx");
+  try {
+    await handle.writeFile(JSON.stringify(value, null, 2));
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await fs.rename(temporary, file);
 }
-export function validateProject(input) {
-  if (!input || typeof input !== "object") fail("项目格式无效");
-  const name = string(input.name, 150, "项目名称").trim();
-  if (!name) fail("请输入项目名称");
+function validateFile(file, type) {
+  const limit = type === "svg" ? 30_000_000 : 2_000_000;
   if (
-    !Array.isArray(input.files) ||
-    input.files.length < 1 ||
-    input.files.length > 64
+    !file ||
+    typeof file.name !== "string" ||
+    !file.name.trim() ||
+    file.name.length > 150 ||
+    /[/\\\x00-\x1f]/.test(file.name) ||
+    typeof file.content !== "string"
   )
-    fail("每个项目需要 1–64 个 Python 文件");
-  const ids = new Set(),
-    names = new Set();
-  const files = input.files.map((f) => {
-    if (!f || !validId(f.id) || ids.has(f.id)) fail("代码文件 ID 无效或重复");
-    const name = fileName(f.name, ".py");
-    if (names.has(name.toLowerCase())) fail("代码文件名不能重复");
-    ids.add(f.id);
-    names.add(name.toLowerCase());
-    return {
-      id: f.id,
-      name,
-      content: string(f.content, 2_000_000, "代码文件"),
-    };
-  });
-  let svg = null;
-  if (input.svg) {
-    svg = {
-      name: fileName(input.svg.name, ".svg"),
-      content: string(input.svg.content, 30_000_000, "SVG"),
-    };
-    if (!/<svg[\s>]/i.test(svg.content)) fail("文件中没有 SVG 根元素");
+    throw new HttpError(400, "文件格式无效");
+  if (Buffer.byteLength(file.content, "utf8") > limit)
+    throw new HttpError(
+      413,
+      type === "svg" ? "SVG 不能超过 30 MB" : "代码不能超过 2 MB",
+    );
+  if (
+    type === "svg" &&
+    (!file.name.toLowerCase().endsWith(".svg") ||
+      !/<svg[\s>]/i.test(file.content))
+  )
+    throw new HttpError(400, "请选择有效的 SVG 文件");
+  return { name: file.name, content: file.content };
+}
+
+// Import the previous active file once. The old project directories stay intact.
+async function readLegacy(root) {
+  let activeId;
+  try {
+    activeId = (await readJSON(path.join(root, "workspace.json")))
+      .activeProjectId;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
   }
-  if (!Array.isArray(input.bindings) || input.bindings.length > 5000)
-    fail("绑定数量超过限制");
-  const bindingIds = new Set();
-  const bindings = input.bindings.map((b) => {
-    if (!b || !validId(b.id) || bindingIds.has(b.id))
-      fail("绑定 ID 无效或重复");
-    bindingIds.add(b.id);
-    const file = files.find((f) => f.name === b.code?.file);
-    if (!file) fail("绑定引用的代码文件不存在");
-    const lines = file.content.split("\n").length;
-    const startLine = integer(b.code.startLine, 1, lines, "起始行");
-    const endLine = integer(b.code.endLine, startLine, lines, "结束行");
-    const r = b.svgRegion;
-    if (!r) fail("缺少 SVG 区域");
-    const region = {
-      x: number(r.x, -1e8, 1e8, "X"),
-      y: number(r.y, -1e8, 1e8, "Y"),
-      width: number(r.width, 0.01, 1e8, "宽度"),
-      height: number(r.height, 0.01, 1e8, "高度"),
-    };
-    const annotation = b.annotation
-      ? {
-          x: number(b.annotation.x, -1e8, 1e8, "注释 X"),
-          y: number(b.annotation.y, -1e8, 1e8, "注释 Y"),
-        }
-      : undefined;
-    return {
-      id: b.id,
-      name: string(b.name, 200, "绑定名称"),
-      color: /^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#8978ff",
-      code: { file: file.name, startLine, endLine },
-      svgRegion: region,
-      note: string(b.note ?? "", 200_000, "备注"),
-      ...(annotation ? { annotation } : {}),
-    };
-  });
-  if (bindings.length && !svg) fail("有绑定时必须有 SVG");
-  const u = input.ui || {};
-  const editorViews = {};
-  for (const f of files) {
-    const v = u.editorViews?.[f.id];
-    if (v)
-      editorViews[f.id] = {
-        anchor: integer(v.anchor, 0, f.content.length, "光标"),
-        head: integer(v.head, 0, f.content.length, "光标"),
-        scrollTop: number(v.scrollTop, 0, 1e9, "编辑器滚动"),
-        scrollLeft: number(v.scrollLeft, 0, 1e9, "编辑器滚动"),
-      };
+  const directory = path.join(root, "projects");
+  let ids;
+  try {
+    ids = (await fs.readdir(directory, { withFileTypes: true }))
+      .filter((e) => e.isDirectory() && validId(e.name))
+      .map((e) => e.name);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
   }
-  const camera = u.camera
-    ? {
-        scale: number(u.camera.scale, 0.001, 8, "缩放"),
-        centerX: number(u.camera.centerX, -1e9, 1e9, "视图 X"),
-        centerY: number(u.camera.centerY, -1e9, 1e9, "视图 Y"),
-      }
-    : null;
+  if (ids.includes(activeId)) ids = [activeId];
+  const candidates = [];
+  for (const id of ids) {
+    const folder = path.join(directory, id);
+    let pointer;
+    try {
+      pointer = await readJSON(path.join(folder, "current.json"));
+    } catch (error) {
+      if (error.code === "ENOENT" && id !== activeId) continue;
+      throw error;
+    }
+    if (!validId(pointer.version)) throw new Error("旧版项目版本格式无效");
+    const snapshot = path.join(folder, "versions", pointer.version);
+    const project = await readJSON(path.join(snapshot, "project.json"));
+    candidates.push({ id, snapshot, project });
+  }
+  const selected =
+    candidates.find((p) => p.id === activeId) ||
+    candidates.sort((a, b) =>
+      String(b.project.updatedAt).localeCompare(String(a.project.updatedAt)),
+    )[0];
+  if (!selected) return null;
+  const { project, snapshot } = selected;
+  const file =
+    project.files.find((f) => f.id === project.ui?.activeFileId) ||
+    project.files[0];
+  if (!file || !validId(file.id)) throw new Error("旧版代码文件格式无效");
   return {
-    name,
-    files,
-    svg,
-    bindings,
-    ui: {
-      activeFileId: ids.has(u.activeFileId) ? u.activeFileId : files[0].id,
-      split: number(u.split ?? 46, 22, 78, "面板比例"),
-      theme: u.theme === "light" ? "light" : "dark",
-      showCode: !!u.showCode,
-      camera,
-      selectedBindingId: bindingIds.has(u.selectedBindingId)
-        ? u.selectedBindingId
-        : null,
-      editorViews,
-      portraitTab: u.portraitTab === "svg" ? "svg" : "code",
+    code: {
+      name: file.name,
+      content: await fs.readFile(
+        path.join(snapshot, "sources", `${file.id}.py`),
+        "utf8",
+      ),
     },
+    svg: project.svg
+      ? {
+          name: project.svg.name,
+          content: await fs.readFile(
+            path.join(snapshot, "network.svg"),
+            "utf8",
+          ),
+        }
+      : null,
   };
 }
-export const blankProject = (name) => ({
-  name,
-  files: [
-    {
-      id: randomUUID(),
-      name: "model.py",
-      content: "# 在此编写或上传 Python / PyTorch 模型代码\n",
-    },
-  ],
-  svg: null,
-  bindings: [],
-  ui: {},
-});
 
 export function createStore(dataDir) {
-  const root = path.resolve(dataDir);
-  const locks = new Map();
-  const projectPath = (id) => {
-    if (!validId(id)) throw new HttpError(400, "项目 ID 无效");
-    return path.join(root, "projects", id);
-  };
-  const json = async (p) => JSON.parse(await fs.readFile(p, "utf8"));
-  async function atomic(p, data) {
-    await fs.mkdir(path.dirname(p), { recursive: true });
-    const tmp = `${p}.${randomUUID()}.tmp`;
-    const handle = await fs.open(tmp, "wx");
+  const root = path.resolve(dataDir),
+    metadataPath = path.join(root, "content.json");
+  let loaded,
+    queue = Promise.resolve();
+  async function saveSvg(svg) {
+    if (!svg) return null;
+    const hash = createHash("sha256").update(svg.content).digest("hex");
+    const file = path.join(root, "svg", `${hash}.svg`);
+    await fs.mkdir(path.dirname(file), { recursive: true });
     try {
-      await handle.writeFile(JSON.stringify(data, null, 2));
-      await handle.sync();
-    } finally {
-      await handle.close();
+      const handle = await fs.open(file, "wx");
+      try {
+        await handle.writeFile(svg.content);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
     }
-    await fs.rename(tmp, p);
+    return { name: svg.name, hash };
   }
-  function exclusive(id, fn) {
-    const previous = locks.get(id) || Promise.resolve();
-    const next = previous.catch(() => {}).then(fn);
-    locks.set(id, next);
-    return next.finally(() => {
-      if (locks.get(id) === next) locks.delete(id);
-    });
-  }
-  async function read(id) {
+  async function initialize() {
+    await fs.mkdir(root, { recursive: true });
     try {
-      const dir = projectPath(id);
-      const pointer = await json(path.join(dir, "current.json"));
-      const folder = path.join(dir, "versions", pointer.version);
-      const metadata = await json(path.join(folder, "project.json"));
-      const [bindings, files, svg] = await Promise.all([
-        json(path.join(folder, "bindings.json")),
-        Promise.all(
-          metadata.files.map(async (f) => ({
-            ...f,
-            content: await fs.readFile(
-              path.join(folder, "sources", `${f.id}.py`),
-              "utf8",
-            ),
-          })),
-        ),
-        metadata.svg
-          ? fs
-              .readFile(path.join(folder, "network.svg"), "utf8")
-              .then((content) => ({ ...metadata.svg, content }))
-          : null,
-      ]);
-      return { ...metadata, bindings, files, svg };
-    } catch (e) {
-      if (e.code === "ENOENT") throw new HttpError(404, "项目不存在");
-      throw e;
+      return await readJSON(metadataPath);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
     }
-  }
-  async function write(id, input, old) {
-    const data = validateProject(input);
-    const revision = (old?.revision || 0) + 1;
-    const version = `${revision}-${randomUUID()}`;
-    const dir = projectPath(id);
-    const folder = path.join(dir, "versions", version);
-    const previous = old
-      ? path.join(
-          dir,
-          "versions",
-          (await json(path.join(dir, "current.json"))).version,
-        )
-      : null;
-    await fs.mkdir(path.join(folder, "sources"), { recursive: true });
-    const project = {
-      ...data,
-      id,
-      revision,
-      createdAt: old?.createdAt || new Date().toISOString(),
+    const legacy = await readLegacy(root);
+    const document = {
+      schemaVersion: 2,
+      revision: 1,
+      code: legacy?.code || { name: "model.py", content: "" },
+      svg: await saveSvg(legacy?.svg),
       updatedAt: new Date().toISOString(),
     };
-    const metadata = {
-      ...project,
-      files: data.files.map(({ content, ...f }) => f),
-      svg: data.svg ? { name: data.svg.name } : null,
-    };
-    delete metadata.bindings;
-    const contentFile = async (relative, content, unchanged) => {
-      const target = path.join(folder, relative);
-      // Reuse immutable file bytes for camera/layout saves; do not duplicate a large SVG.
-      if (previous && unchanged)
-        await fs.link(path.join(previous, relative), target);
-      else await fs.writeFile(target, content);
-    };
-    await Promise.all([
-      atomic(path.join(folder, "project.json"), metadata),
-      atomic(path.join(folder, "bindings.json"), data.bindings),
-      ...data.files.map((f) =>
-        contentFile(
-          path.join("sources", `${f.id}.py`),
-          f.content,
-          old?.files.some((o) => o.id === f.id && o.content === f.content),
-        ),
-      ),
-      ...(data.svg
-        ? [
-            contentFile(
-              "network.svg",
-              data.svg.content,
-              old?.svg?.content === data.svg.content,
-            ),
-          ]
-        : []),
-    ]);
-    // A single pointer rename publishes a complete snapshot. Keep the previous revision.
-    await atomic(path.join(dir, "current.json"), { version, revision });
-    const versions = await fs.readdir(path.join(dir, "versions"));
-    await Promise.all(
-      versions
-        .filter((v) => Number(v.split("-")[0]) < revision - 1)
-        .map((v) =>
-          fs.rm(path.join(dir, "versions", v), {
-            recursive: true,
-            force: true,
-          }),
-        ),
-    );
-    return project;
+    await atomicJSON(metadataPath, document);
+    return document;
   }
-  async function list() {
-    const dir = path.join(root, "projects");
-    await fs.mkdir(dir, { recursive: true });
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    const results = await Promise.all(
-      entries
-        .filter((e) => e.isDirectory())
-        .map(async (e) => {
-          try {
-            const pointer = await json(path.join(dir, e.name, "current.json"));
-            const folder = path.join(dir, e.name, "versions", pointer.version);
-            const p = await json(path.join(folder, "project.json"));
-            const bindings = await json(path.join(folder, "bindings.json"));
-            return {
-              id: p.id,
-              name: p.name,
-              revision: p.revision,
-              updatedAt: p.updatedAt,
-              fileCount: p.files.length,
-              bindingCount: bindings.length,
-            };
-          } catch (error) {
-            if (error.code === "ENOENT") return null;
-            throw error;
-          }
-        }),
-    );
-    return results
-      .filter(Boolean)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }
+  const metadata = () =>
+    (loaded ||= initialize().catch((error) => {
+      loaded = null;
+      throw error;
+    }));
   return {
-    read,
-    list,
-    create: (input) => {
-      const id = randomUUID();
-      return exclusive(id, () => write(id, input, null));
+    async state() {
+      const p = await metadata();
+      return { revision: p.revision, updatedAt: p.updatedAt };
     },
-    save: (id, input, partial = false) =>
-      exclusive(id, async () => {
-        const old = await read(id);
-        if (input.revision !== old.revision)
-          throw new HttpError(
-            409,
-            "此项目已在其他页面更新。请先导出本地副本，再重新加载项目。",
-          );
-        const patch = Object.fromEntries(
-          ["name", "files", "svg", "bindings", "ui"]
-            .filter((k) => Object.hasOwn(input, k))
-            .map((k) => [k, input[k]]),
-        );
-        return write(id, partial ? { ...old, ...patch } : input, old);
-      }),
-    remove: (id) =>
-      exclusive(id, async () => {
-        await read(id);
-        await fs.rm(projectPath(id), { recursive: true });
-      }),
-    workspace: async () => {
-      try {
-        return await json(path.join(root, "workspace.json"));
-      } catch (e) {
-        if (e.code === "ENOENT") return { activeProjectId: null };
-        throw e;
-      }
+    async read() {
+      const p = await metadata();
+      return {
+        ...p,
+        svg: p.svg
+          ? {
+              name: p.svg.name,
+              content: await fs.readFile(
+                path.join(root, "svg", `${p.svg.hash}.svg`),
+                "utf8",
+              ),
+            }
+          : null,
+      };
     },
-    setWorkspace: (id) =>
-      exclusive("workspace", async () => {
-        if (id !== null) await read(id);
-        await atomic(path.join(root, "workspace.json"), {
-          activeProjectId: id,
+    save(input) {
+      const operation = queue
+        .catch(() => {})
+        .then(async () => {
+          const old = await metadata();
+          if (input?.revision !== old.revision)
+            throw new HttpError(
+              409,
+              "其他管理页已保存内容。请复制本页代码后刷新，再继续编辑。",
+            );
+          const code = Object.hasOwn(input, "code")
+            ? validateFile(input.code, "code")
+            : old.code;
+          const svg = Object.hasOwn(input, "svg")
+            ? await saveSvg(
+                input.svg === null ? null : validateFile(input.svg, "svg"),
+              )
+            : old.svg;
+          const next = {
+            schemaVersion: 2,
+            revision: old.revision + 1,
+            code,
+            svg,
+            updatedAt: new Date().toISOString(),
+          };
+          await atomicJSON(metadataPath, next);
+          loaded = Promise.resolve(next);
+          return { revision: next.revision, updatedAt: next.updatedAt };
         });
-      }),
+      queue = operation;
+      return operation;
+    },
   };
 }
