@@ -1,0 +1,20 @@
+[Unit]
+Description=CodeFlowGraph - Code and SVG workbench
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/CodeFlowGraph
+ExecStart=/usr/bin/node /opt/CodeFlowGraph/backend/server.js
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3046
+Environment=DATA_DIR=/opt/CodeFlowGraph/data
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
