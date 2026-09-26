@@ -21,6 +21,33 @@ async function saved(page: Page) {
 async function content(page: Page) {
   return (await page.request.get("/api/content")).json();
 }
+async function horizontalEdges(page: Page) {
+  const viewport = page.locator(".svg-viewport");
+  const box = (await viewport.boundingBox())!;
+  await viewport.evaluate((e) => {
+    e.scrollLeft = 0;
+  });
+  const initial = (await page.locator("#display-svg").boundingBox())!;
+  expect(Math.abs(initial.x - box.x)).toBeLessThan(1);
+  await viewport.evaluate((e) => {
+    e.scrollLeft = e.scrollWidth;
+  });
+  const width = await viewport.evaluate((e) => e.clientWidth);
+  if (initial.width > width) {
+    const drawing = (await page.locator("#display-svg").boundingBox())!;
+    expect(Math.abs(drawing.x + drawing.width - box.x - width)).toBeLessThan(
+      1.5,
+    );
+  } else {
+    expect(await viewport.evaluate((e) => e.scrollLeft)).toBe(0);
+    expect(
+      await viewport.evaluate((e) => e.scrollWidth - e.clientWidth),
+    ).toBeLessThanOrEqual(1);
+  }
+  await viewport.evaluate((e) => {
+    e.scrollLeft = 0;
+  });
+}
 async function verticalEdges(page: Page) {
   const viewport = page.locator(".svg-viewport");
   const box = (await viewport.boundingBox())!;
@@ -103,10 +130,20 @@ test("full-page SVG supports create/edit/drag/zoom/sync/delete labels without re
   expect(canvas.x).toBe(sidebar.width);
   expect(canvas.width + sidebar.width).toBe(1440);
   expect(canvas.height).toBe(960);
+  await horizontalEdges(page);
+  expect(
+    Math.abs(
+      (await page.locator("#display-svg").boundingBox())!.width -
+        (await page.locator(".svg-viewport").evaluate((e) => e.clientWidth)),
+    ),
+  ).toBeLessThan(1);
+  await page.getByRole("button", { name: "放大图片" }).click();
+  await horizontalEdges(page);
   await verticalEdges(page);
   // Zooming out must not retain the unscaled SVG box as blank scrolling space.
   await page.getByRole("button", { name: "恢复 100%" }).click();
   await page.getByRole("button", { name: "缩小图片" }).click();
+  await horizontalEdges(page);
   await verticalEdges(page);
   await page.getByRole("button", { name: "适应宽度" }).click();
   await expect(page.locator("input[type=file], .cm-editor")).toHaveCount(0);
@@ -257,6 +294,7 @@ test("tablet taps place labels; touch drag, pinch and scrolling keep original SV
   await page.setViewportSize({ width: 820, height: 1180 });
   await page.getByRole("button", { name: "适应宽度" }).click();
   await alignment(page, moved);
+  await horizontalEdges(page);
   await verticalEdges(page);
   expect(
     await page.evaluate(
@@ -294,6 +332,9 @@ test("short SVG stays at the top without a blank vertical scroll range on smalle
   ]) {
     await page.setViewportSize(size);
     await page.getByRole("button", { name: "适应宽度" }).click();
+    await horizontalEdges(page);
+    await page.getByRole("button", { name: "缩小图片" }).click();
+    await horizontalEdges(page);
     const viewport = page.locator(".svg-viewport");
     const box = (await viewport.boundingBox())!;
     expect(

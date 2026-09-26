@@ -210,29 +210,26 @@ export function SvgViewer({
     renderLabels();
     document.fonts.addEventListener("loadingdone", renderLabels);
     let scale = 1,
-      offsetX = 0,
       autoFit = true,
       frame = 0;
     let camera: Camera | null = null;
     const clampScale = (value: number) => Math.max(0.001, Math.min(8, value));
     const readCamera = (): Camera => ({
       scale,
-      centerX:
-        bounds.x + (view.scrollLeft + view.clientWidth / 2 - offsetX) / scale,
+      centerX: bounds.x + (view.scrollLeft + view.clientWidth / 2) / scale,
       centerY: bounds.y + (view.scrollTop + view.clientHeight / 2) / scale,
     });
     const position = (next: Camera) => {
       if (!view.clientWidth || !view.clientHeight) return;
       scale = clampScale(next.scale);
-      offsetX = view.clientWidth;
-      host.style.width = `${bounds.width * scale + offsetX * 2}px`;
-      // Vertical scrolling stops at the drawing edges, without canvas padding.
+      // Scrolling stops at all four drawing edges, without canvas padding.
+      host.style.width = `${bounds.width * scale}px`;
       host.style.height = `${bounds.height * scale}px`;
-      scene.style.left = `${offsetX}px`;
+      scene.style.left = "0";
       scene.style.top = "0";
       scene.style.transform = `scale(${scale})`;
       view.scrollLeft =
-        (next.centerX - bounds.x) * scale + offsetX - view.clientWidth / 2;
+        (next.centerX - bounds.x) * scale - view.clientWidth / 2;
       view.scrollTop =
         (next.centerY - bounds.y) * scale - view.clientHeight / 2;
       if (percent.current)
@@ -241,7 +238,7 @@ export function SvgViewer({
     };
     const fit = () => {
       autoFit = true;
-      const k = clampScale((view.clientWidth - 48) / bounds.width);
+      const k = clampScale(view.clientWidth / bounds.width);
       position({
         scale: k,
         centerX: bounds.x + bounds.width / 2,
