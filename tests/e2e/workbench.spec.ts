@@ -2,24 +2,26 @@ import { test, expect, type Page } from "@playwright/test";
 const svg =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 500 600 2400"><style>text{fill:#506080;font-size:24px}rect{stroke:#aaa}</style><rect x="-100" y="500" width="600" height="2400" fill="white"/><g transform="translate(30 650)"><rect width="300" height="140" rx="6" fill="#e8e3fb"/><text x="22" y="80">Attention</text></g><text x="50" y="2820">Output</text></svg>';
 async function seed(page: Page) {
-  const current = await (await page.request.get("/api/content")).json();
-  expect(
-    (
-      await page.request.patch("/api/content", {
-        data: {
-          revision: current.revision,
-          svg: { name: "model.svg", content: svg },
-          labels: [],
-        },
-      })
-    ).ok(),
-  ).toBeTruthy();
+  const gallery = await (await page.request.get("/api/gallery")).json();
+  for (const image of gallery.images) {
+    const removed = await page.request.delete(`/api/images/${image.id}`, {
+      data: { revision: image.revision },
+    });
+    expect(removed.ok()).toBeTruthy();
+  }
+  const response = await page.request.post("/api/images", {
+    data: { svg: { name: "model.svg", content: svg } },
+  });
+  expect(response.ok()).toBeTruthy();
+  return (await response.json()).image;
 }
 async function saved(page: Page) {
   await expect(page.locator(".save-state")).toHaveText("已保存");
 }
-async function content(page: Page) {
-  return (await page.request.get("/api/content")).json();
+async function content(page: Page, id?: string) {
+  const currentId =
+    id || (await (await page.request.get("/api/gallery")).json()).activeImageId;
+  return (await page.request.get(`/api/images/${currentId}`)).json();
 }
 async function horizontalEdges(page: Page) {
   const viewport = page.locator(".svg-viewport");
@@ -118,6 +120,9 @@ test("full-page SVG supports create/edit/drag/zoom/sync/delete labels without re
     mimeType: "image/svg+xml",
     buffer: Buffer.from(svg),
   });
+  await expect(
+    page.getByRole("button", { name: "打开图片：network", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await saved(page);
   await page.goto("/");
   await expect(page.locator("#display-svg")).toBeVisible();
@@ -218,17 +223,21 @@ test("full-page SVG supports create/edit/drag/zoom/sync/delete labels without re
   await page.reload();
   await expect(page.locator("#display-svg")).toBeVisible();
   await expect(page.locator("[data-label-id]")).toHaveCount(0);
-  // Replacement is explicit and removes annotations belonging to the previous drawing.
-  await addLabel(page, "旧图标签");
+  // Adding a picture retains the previous image and its annotations.
+  const retained = await addLabel(page, "旧图标签");
+  const previous = await content(page);
   await page.goto("/admin");
-  page.once("dialog", (dialog) => dialog.accept());
   await page.locator('input[type="file"]').setInputFiles({
-    name: "replacement.svg",
+    name: "additional.svg",
     mimeType: "image/svg+xml",
-    buffer: Buffer.from(svg.replace("Attention", "Replaced")),
+    buffer: Buffer.from(svg.replace("Attention", "Additional")),
   });
+  await expect(
+    page.getByRole("button", { name: "打开图片：additional", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await saved(page);
   await expect(page.locator("[data-label-id]")).toHaveCount(0);
+  expect((await content(page, previous.id)).labels[0].id).toBe(retained.id);
   expect(errors).toEqual([]);
   await other.close();
 });
@@ -313,10 +322,8 @@ test("short SVG stays at the top without a blank vertical scroll range on smalle
   page,
 }) => {
   await seed(page);
-  const current = await content(page);
-  await page.request.patch("/api/content", {
+  await page.request.post("/api/images", {
     data: {
-      revision: current.revision,
       svg: {
         name: "short.svg",
         content:
@@ -349,7 +356,7 @@ test("short SVG stays at the top without a blank vertical scroll range on smalle
       sidebar.getByRole("button", { name: "添加标签", exact: true }),
     ).toBeVisible();
     await expect(
-      sidebar.getByRole("button", { name: "替换 SVG" }),
+      sidebar.getByRole("button", { name: "添加 SVG" }),
     ).toBeVisible();
     expect(
       await page.evaluate(
@@ -357,4 +364,123 @@ test("short SVG stays at the top without a blank vertical scroll range on smalle
       ),
     ).toBe(true);
   }
+});
+
+test("image library names, switches, persists drafts, blocks failed saves and deletes independently", async ({
+  page,
+}) => {
+  const a = await seed(page);
+  await page.goto("/admin");
+  const aLabel = await addLabel(page, "A 图标签");
+  await page.getByRole("button", { name: "重命名图片" }).click();
+  await page.getByRole("textbox", { name: "图片名称" }).fill("UNet 基线");
+  await page.getByRole("button", { name: "保存名称", exact: true }).click();
+  const aItem = page.getByRole("button", {
+    name: "打开图片：UNet 基线",
+    exact: true,
+  });
+  await expect(aItem).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(`[data-label-id="${aLabel.id}"]`)).toContainText(
+    "A 图标签",
+  );
+  // Identical SVG bytes still represent independently named, annotated images.
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles({
+      name: "UNetPlus.svg",
+      mimeType: "image/svg+xml",
+      buffer: Buffer.from(svg),
+    });
+  const bItem = page.getByRole("button", {
+    name: "打开图片：UNetPlus",
+    exact: true,
+  });
+  await expect(bItem).toHaveAttribute("aria-pressed", "true");
+  await saved(page);
+  const b = await content(page);
+  expect(b.id).not.toBe(a.id);
+  await expect(page.locator("[data-label-id]")).toHaveCount(0);
+  const bLabel = await addLabel(page, "B 图标签");
+  await page.locator(`[data-label-id="${bLabel.id}"]`).click();
+  await page
+    .getByRole("textbox", { name: "标签文字" })
+    .fill("B 的草稿随切换保存");
+  await aItem.click();
+  await expect(aItem).toHaveAttribute("aria-pressed", "true");
+  expect((await content(page, b.id)).labels[0].text).toBe("B 的草稿随切换保存");
+  await expect(page.locator("[data-label-id]")).toHaveCount(1);
+  await expect(page.locator(`[data-label-id="${aLabel.id}"]`)).toContainText(
+    "A 图标签",
+  );
+  // A failed save must leave this image open with its unsaved annotations intact.
+  await page.route(`**/api/images/${a.id}`, (route) =>
+    route.request().method() === "PATCH"
+      ? route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "测试保存失败" }),
+        })
+      : route.continue(),
+  );
+  await page.getByRole("button", { name: "添加标签", exact: true }).click();
+  const p = await point(page, 240, 670);
+  await page.mouse.click(p.x, p.y);
+  await page.getByRole("textbox", { name: "标签文字" }).fill("A 的新增草稿");
+  await bItem.click();
+  await expect(page.getByRole("alert")).toContainText("测试保存失败");
+  await expect(aItem).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-label-id]")).toHaveCount(2);
+  expect((await content(page, a.id)).labels).toHaveLength(1);
+  await page.unroute(`**/api/images/${a.id}`);
+  await page.keyboard.press("Control+s");
+  await saved(page);
+  await bItem.click();
+  await expect(bItem).toHaveAttribute("aria-pressed", "true");
+  expect((await content(page, a.id)).labels).toHaveLength(2);
+  await page.reload();
+  await expect(bItem).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(`[data-label-id="${bLabel.id}"]`)).toContainText(
+    "B 的草稿随切换保存",
+  );
+  const display = await page.context().newPage();
+  await display.goto("/");
+  await expect(
+    display.getByRole("button", { name: "打开图片：UNetPlus", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(display.getByRole("button", { name: "删除图片" })).toHaveCount(
+    0,
+  );
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "删除图片" }).click();
+  await expect(bItem).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除图片" }).click();
+  await expect(bItem).toHaveCount(0);
+  await expect(aItem).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-label-id]")).toHaveCount(2);
+  expect((await page.request.get(`/api/images/${b.id}`)).status()).toBe(404);
+  // Another idle page follows the deletion without showing annotations on the wrong SVG.
+  await expect(
+    display.getByRole("button", { name: "打开图片：UNetPlus", exact: true }),
+  ).toHaveCount(0, { timeout: 12000 });
+  await expect(display.locator(`[data-label-id="${aLabel.id}"]`)).toContainText(
+    "A 图标签",
+  );
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除图片" }).click();
+  await expect(page.locator(".empty-svg")).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".empty-svg")).toBeVisible();
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles({
+      name: "重新添加.svg",
+      mimeType: "image/svg+xml",
+      buffer: Buffer.from(svg),
+    });
+  await expect(
+    page.getByRole("button", { name: "打开图片：重新添加", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-label-id]")).toHaveCount(0);
+  await display.close();
 });

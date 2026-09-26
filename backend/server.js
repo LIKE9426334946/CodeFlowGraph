@@ -32,10 +32,26 @@ export function createApp(
   app.get("/api/health", (_req, res) =>
     res.json({ ok: true, name: "CodeFlowGraph" }),
   );
-  app.get("/api/state", async (_req, res) => res.json(await store.state()));
-  app.get("/api/content", async (_req, res) => res.json(await store.read()));
-  app.patch("/api/content", async (req, res) =>
-    res.json(await store.save(req.body)),
+  app.get("/api/gallery", async (_req, res) => res.json(await store.list()));
+  app.post("/api/images", async (req, res) =>
+    res.status(201).json(await store.create(req.body)),
+  );
+  app.post("/api/gallery/open", async (req, res) =>
+    res.json(await store.open(req.body?.id)),
+  );
+  app.get("/api/images/:id", async (req, res) =>
+    res.json(await store.read(req.params.id)),
+  );
+  app.patch("/api/images/:id", async (req, res) =>
+    res.json(await store.save(req.params.id, req.body)),
+  );
+  app.delete("/api/images/:id", async (req, res) =>
+    res.json(await store.remove(req.params.id, req.body)),
+  );
+  app.use(["/api/content", "/api/state"], (_req, res) =>
+    res
+      .status(410)
+      .json({ error: "页面版本已更新，请刷新浏览器后使用图片列表" }),
   );
   app.use("/api", (_req, res) => res.status(404).json({ error: "接口不存在" }));
   const dist = path.join(here, "..", "dist");
@@ -47,16 +63,14 @@ export function createApp(
   app.use((error, _req, res, _next) => {
     const status = error.status || 500;
     if (status >= 500) console.error(error);
-    res
-      .status(status)
-      .json({
-        error:
-          status === 413
-            ? "文件超过大小限制"
-            : status >= 500
-              ? "无法读取或保存服务器内容，请重试"
-              : error.message,
-      });
+    res.status(status).json({
+      error:
+        status === 413
+          ? "文件超过大小限制"
+          : status >= 500
+            ? "无法读取或保存服务器内容，请重试"
+            : error.message,
+    });
   });
   return app;
 }

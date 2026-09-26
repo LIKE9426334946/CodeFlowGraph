@@ -454,3 +454,131 @@ svg {
     animation: none;
   }
 }
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.image-library {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.library-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  color: #778598;
+  font-size: 12px;
+}
+.library-heading strong {
+  font-weight: 500;
+}
+.library-heading small {
+  font-size: 11px;
+}
+.library-add {
+  justify-content: flex-start;
+}
+.image-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: min(28dvh, 240px);
+  overflow-y: auto;
+  min-width: 0;
+}
+.image-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  flex-shrink: 0;
+  padding: 8px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 12px;
+  color: #718095;
+}
+.image-item > span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.image-item.selected {
+  background: #eeebfb;
+  color: var(--accent);
+}
+.library-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 4px;
+  margin: 8px 0;
+}
+.image-manage-actions {
+  display: flex;
+  gap: 5px;
+}
+.image-manage-actions .button {
+  flex: 1;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.image-manage-actions .delete-image {
+  color: #b75560;
+}
+.image-name-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.image-name-form label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.image-name-form input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 8px;
+  border: 1px solid #bfb5ea;
+  border-radius: 5px;
+}
+.image-name-form > div {
+  display: flex;
+  gap: 4px;
+}
+.image-name-form .button {
+  padding: 0 8px;
+  flex: 1;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .svg-viewer {
+    --sidebar-width: 148px;
+  }
+  .brand {
+    justify-content: flex-start;
+    padding-left: 8px;
+  }
+  .zoom-controls {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) 40px;
+  }
+  .zoom-controls .icon-button {
+    width: 40px;
+  }
+  .viewer-tools .library-add > span {
+    display: inline;
+  }
+  .library-add {
+    padding: 0 8px;
+  }
+  .image-list {
+    max-height: 24dvh;
+  }
+}

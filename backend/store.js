@@ -1,4 +1,4 @@
-import { promises as fs, constants } from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -129,133 +129,261 @@ async function readLegacy(root) {
   };
 }
 
+function validateName(name) {
+  if (
+    typeof name !== "string" ||
+    !name.trim() ||
+    name.trim().length > 150 ||
+    /[\x00-\x1f]/.test(name)
+  )
+    throw new HttpError(400, "图片名称需要 1～150 个字符");
+  return name.trim();
+}
+const imageSummary = ({
+  id,
+  name,
+  revision,
+  createdAt,
+  updatedAt,
+  labels,
+}) => ({
+  id,
+  name,
+  revision,
+  createdAt,
+  updatedAt,
+  labelCount: labels.length,
+});
+const gallerySummary = (gallery) => ({
+  schemaVersion: 4,
+  revision: gallery.revision,
+  activeImageId: gallery.activeImageId,
+  images: gallery.images.map(imageSummary),
+  updatedAt: gallery.updatedAt,
+});
+
 export function createStore(dataDir) {
   const root = path.resolve(dataDir),
-    metadataPath = path.join(root, "content.json");
+    metadataPath = path.join(root, "gallery.json");
+  const svgDir = path.join(root, "gallery-svg");
   let loaded,
     queue = Promise.resolve();
   async function saveSvg(svg) {
-    if (!svg) return null;
     const hash = createHash("sha256").update(svg.content).digest("hex");
-    const file = path.join(root, "svg", `${hash}.svg`);
-    await fs.mkdir(path.dirname(file), { recursive: true });
+    const file = path.join(svgDir, `${hash}.svg`);
+    await fs.mkdir(svgDir, { recursive: true });
     try {
-      const handle = await fs.open(file, "wx");
+      await fs.access(file);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      const temporary = `${file}.${randomUUID()}.tmp`;
+      const handle = await fs.open(temporary, "wx");
       try {
         await handle.writeFile(svg.content);
         await handle.sync();
       } finally {
         await handle.close();
       }
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      await fs.rename(temporary, file);
     }
     return { name: svg.name, hash };
   }
   async function initialize() {
     await fs.mkdir(root, { recursive: true });
     try {
-      const old = await readJSON(metadataPath);
-      if (old.schemaVersion === 3) return old;
-      if (old.schemaVersion !== 2) throw new Error("不支持的内容版本");
-      // Keep an exact backup, including the removed code, before migrating.
-      try {
-        await fs.copyFile(
-          metadataPath,
-          path.join(root, "content-v2.backup.json"),
-          constants.COPYFILE_EXCL,
-        );
-      } catch (error) {
-        if (error.code !== "EEXIST") throw error;
-      }
-      const migrated = {
-        schemaVersion: 3,
-        revision: old.revision + 1,
-        svg: old.svg,
-        labels: [],
-        updatedAt: new Date().toISOString(),
-      };
-      await atomicJSON(metadataPath, migrated);
-      return migrated;
+      const gallery = await readJSON(metadataPath);
+      if (gallery.schemaVersion !== 4) throw new Error("不支持的图片库版本");
+      return gallery;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
-    const legacy = await readLegacy(root);
-    const document = {
-      schemaVersion: 3,
+    // Read the previous document once. Keep all legacy files untouched as a backup.
+    let old;
+    try {
+      old = await readJSON(path.join(root, "content.json"));
+      if (![2, 3].includes(old.schemaVersion))
+        throw new Error("不支持的旧版内容版本");
+      if (old.svg)
+        old = {
+          ...old,
+          svg: {
+            name: old.svg.name,
+            content: await fs.readFile(
+              path.join(root, "svg", `${old.svg.hash}.svg`),
+              "utf8",
+            ),
+          },
+        };
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      // A missing referenced SVG is an error; it must not silently create an empty gallery.
+      if (old) throw error;
+      old = await readLegacy(root);
+    }
+    const now = new Date().toISOString();
+    const image = old?.svg
+      ? {
+          id: randomUUID(),
+          name: validateName(
+            old.svg.name.replace(/\.svg$/i, "") || old.svg.name,
+          ),
+          revision: 1,
+          svg: await saveSvg(validateFile(old.svg)),
+          labels: validateLabels(old.labels || []),
+          createdAt: old.updatedAt || now,
+          updatedAt: now,
+        }
+      : null;
+    const gallery = {
+      schemaVersion: 4,
       revision: 1,
-      svg: await saveSvg(legacy?.svg),
-      labels: [],
-      updatedAt: new Date().toISOString(),
+      activeImageId: image?.id || null,
+      images: image ? [image] : [],
+      updatedAt: now,
     };
-    await atomicJSON(metadataPath, document);
-    return document;
+    await atomicJSON(metadataPath, gallery);
+    return gallery;
   }
   const metadata = () =>
     (loaded ||= initialize().catch((error) => {
       loaded = null;
       throw error;
     }));
+  const exclusive = (work) => {
+    const operation = queue.catch(() => {}).then(work);
+    queue = operation;
+    return operation;
+  };
+  const find = (gallery, id) => {
+    const image = validId(id) && gallery.images.find((item) => item.id === id);
+    if (!image)
+      throw new HttpError(404, "这张图片已被删除或不存在，请刷新图片列表");
+    return image;
+  };
+  const expand = async (image) => ({
+    ...image,
+    svg: {
+      name: image.svg.name,
+      content: await fs.readFile(
+        path.join(svgDir, `${image.svg.hash}.svg`),
+        "utf8",
+      ),
+    },
+  });
+  const checkRevision = (image, input) => {
+    if (input?.revision !== image.revision)
+      throw new HttpError(
+        409,
+        "这张图片已在其他页面更新，本页修改暂未保存。请保留标签文字后刷新，再继续编辑。",
+      );
+  };
+  async function commit(old, patch) {
+    const next = {
+      ...old,
+      ...patch,
+      revision: old.revision + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    await atomicJSON(metadataPath, next);
+    loaded = Promise.resolve(next);
+    return next;
+  }
   return {
-    async state() {
-      const p = await metadata();
-      return { revision: p.revision, updatedAt: p.updatedAt };
+    async list() {
+      return gallerySummary(await metadata());
     },
-    async read() {
-      const p = await metadata();
-      return {
-        ...p,
-        svg: p.svg
-          ? {
-              name: p.svg.name,
-              content: await fs.readFile(
-                path.join(root, "svg", `${p.svg.hash}.svg`),
-                "utf8",
-              ),
-            }
-          : null,
-      };
+    async read(id) {
+      return expand(find(await metadata(), id));
     },
-    save(input) {
-      const operation = queue
-        .catch(() => {})
-        .then(async () => {
-          const old = await metadata();
-          if (input?.revision !== old.revision)
-            throw new HttpError(
-              409,
-              "其他页面已保存更新，本页修改暂未保存。请先保留标签文字，再刷新页面继续编辑。",
-            );
-          if (
-            Object.keys(input).some(
-              (key) => !["revision", "svg", "labels"].includes(key),
-            )
-          )
-            throw new HttpError(400, "仅支持保存 SVG 和标签");
-          // Validate before writing any SVG or metadata.
-          const suppliedLabels = Object.hasOwn(input, "labels")
-            ? validateLabels(input.labels)
-            : null;
-          const svg = Object.hasOwn(input, "svg")
-            ? await saveSvg(input.svg === null ? null : validateFile(input.svg))
-            : old.svg;
-          const labels =
-            suppliedLabels ?? (svg?.hash === old.svg?.hash ? old.labels : []);
-          if (!svg && labels.length)
-            throw new HttpError(400, "请先上传 SVG，再添加标签");
-          const next = {
-            schemaVersion: 3,
-            revision: old.revision + 1,
-            svg,
-            labels,
-            updatedAt: new Date().toISOString(),
-          };
-          await atomicJSON(metadataPath, next);
-          loaded = Promise.resolve(next);
-          return { revision: next.revision, updatedAt: next.updatedAt };
+    create(input) {
+      return exclusive(async () => {
+        const old = await metadata(),
+          svg = validateFile(input?.svg);
+        const name = validateName(
+          input?.name ??
+            (svg.name.replace(/\.svg$/i, "").trim() || "未命名图片"),
+        );
+        const labels = validateLabels(input?.labels ?? []),
+          now = new Date().toISOString();
+        const image = {
+          id: randomUUID(),
+          name,
+          revision: 1,
+          svg: await saveSvg(svg),
+          labels,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const next = await commit(old, {
+          images: [image, ...old.images],
+          activeImageId: image.id,
         });
-      queue = operation;
-      return operation;
+        return { gallery: gallerySummary(next), image: { ...image, svg } };
+      });
+    },
+    open(id) {
+      return exclusive(async () => {
+        const old = await metadata(),
+          image = await expand(find(old, id));
+        const next =
+          old.activeImageId === id
+            ? old
+            : await commit(old, { activeImageId: id });
+        return { gallery: gallerySummary(next), image };
+      });
+    },
+    save(id, input) {
+      return exclusive(async () => {
+        const old = await metadata(),
+          image = find(old, id);
+        checkRevision(image, input);
+        if (
+          Object.keys(input).some(
+            (key) => !["revision", "name", "labels"].includes(key),
+          )
+        )
+          throw new HttpError(400, "仅支持修改图片名称和标签");
+        const updated = {
+          ...image,
+          name: Object.hasOwn(input, "name")
+            ? validateName(input.name)
+            : image.name,
+          labels: Object.hasOwn(input, "labels")
+            ? validateLabels(input.labels)
+            : image.labels,
+          revision: image.revision + 1,
+          updatedAt: new Date().toISOString(),
+        };
+        const next = await commit(old, {
+          images: old.images.map((item) => (item.id === id ? updated : item)),
+        });
+        return { image: imageSummary(updated), gallery: gallerySummary(next) };
+      });
+    },
+    remove(id, input) {
+      return exclusive(async () => {
+        const old = await metadata(),
+          image = find(old, id);
+        checkRevision(image, input);
+        const images = old.images.filter((item) => item.id !== id);
+        const next = await commit(old, {
+          images,
+          activeImageId:
+            old.activeImageId === id
+              ? images[0]?.id || null
+              : old.activeImageId,
+        });
+        // Identical SVG bytes may be shared by several independently labelled images.
+        if (!images.some((item) => item.svg.hash === image.svg.hash)) {
+          try {
+            await fs.unlink(path.join(svgDir, `${image.svg.hash}.svg`));
+          } catch (error) {
+            if (error.code !== "ENOENT")
+              console.error("无法清理已删除的 SVG 文件", error);
+          }
+        }
+        return { gallery: gallerySummary(next) };
+      });
     },
   };
 }

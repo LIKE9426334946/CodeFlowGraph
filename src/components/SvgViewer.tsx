@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Image,
   Maximize,
@@ -31,23 +38,31 @@ type Gesture = {
 );
 type Props = {
   svg: TextFile | null;
+  name?: string;
   labels: SvgLabel[];
   onLabelsChange: (labels: SvgLabel[]) => void;
   onEditingChange: (editing: boolean) => void;
   actions: ReactNode;
+  library: ReactNode;
   admin: boolean;
   onUpload: () => void;
 };
 
-export function SvgViewer({
-  svg,
-  labels,
-  onLabelsChange,
-  onEditingChange,
-  actions,
-  admin,
-  onUpload,
-}: Props) {
+export type SvgViewerHandle = { finishEditing: () => void };
+export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
+  {
+    svg,
+    name,
+    labels,
+    onLabelsChange,
+    onEditingChange,
+    actions,
+    library,
+    admin,
+    onUpload,
+  }: Props,
+  ref,
+) {
   const viewport = useRef<HTMLDivElement>(null),
     surface = useRef<HTMLDivElement>(null);
   const percent = useRef<HTMLButtonElement>(null),
@@ -548,6 +563,14 @@ export function SvgViewer({
       );
     setEditor(null);
   };
+  useImperativeHandle(ref, () => ({
+    finishEditing() {
+      if (editor?.label.text.trim()) saveLabel();
+      else setEditor(null);
+      setPlacing(false);
+      onEditingChange(false);
+    },
+  }));
   const toggleFullscreen = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -567,9 +590,10 @@ export function SvgViewer({
           <Image size={21} />
           <strong>CodeFlowGraph</strong>
         </a>
-        <span className="file-name" title={svg?.name}>
-          {admin ? "图片管理" : svg?.name || "SVG 图片"}
+        <span className="file-name" title={name || svg?.name}>
+          {name || svg?.name || "SVG 图片"}
         </span>
+        {library}
         <button
           className={`button add-label ${placing ? "active" : ""}`}
           disabled={!svg || labels.length >= 1000}
@@ -760,4 +784,4 @@ export function SvgViewer({
       </div>
     </main>
   );
-}
+});

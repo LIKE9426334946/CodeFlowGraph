@@ -1,85 +1,79 @@
-import { useRef, useState } from "react";
-import {
-  Check,
-  ExternalLink,
-  LoaderCircle,
-  Settings2,
-  Upload,
-} from "lucide-react";
-import { SvgViewer } from "./components/SvgViewer";
+import { useCallback, useRef, useState } from "react";
+import { Check, ExternalLink, LoaderCircle, Settings2 } from "lucide-react";
+import { SvgViewer, type SvgViewerHandle } from "./components/SvgViewer";
+import { ImageLibrary } from "./components/ImageLibrary";
 import { useContent } from "./lib/useContent";
 import { parseSvg } from "./lib/svg";
 
 const admin = /^\/admin\/?$/.test(window.location.pathname);
 export default function App() {
-  const { content, update, flush, status, error, setEditing } = useContent();
-  const [message, setMessage] = useState("");
+  const viewer = useRef<SvgViewerHandle>(null);
+  const beforeChange = useCallback(() => viewer.current?.finishEditing(), []);
+  const {
+    content,
+    gallery,
+    update,
+    flush,
+    status,
+    error,
+    busy,
+    setEditing,
+    open,
+    add,
+    rename,
+    remove,
+  } = useContent(beforeChange);
+  const [message, setMessage] = useState(""),
+    [uploading, setUploading] = useState(false);
   const svgInput = useRef<HTMLInputElement>(null);
   const uploadSvg = async (file?: File) => {
     if (!file) return;
+    setUploading(true);
     try {
       if (!file.name.toLowerCase().endsWith(".svg") || file.size > 30_000_000)
         throw new Error("请选择不超过 30 MB 的 SVG 文件");
       const text = await file.text();
       parseSvg(text);
-      const changed = text !== content?.svg?.content;
-      if (
-        changed &&
-        content?.labels.length &&
-        !window.confirm("替换 SVG 会清空当前图片上的标签，是否继续？")
-      )
-        return;
-      update({
-        svg: { name: file.name, content: text },
-        ...(changed ? { labels: [] } : {}),
-      });
-      await flush();
+      await add({ name: file.name, content: text });
       setMessage("");
     } catch (e) {
       setMessage((e as Error).message);
+    } finally {
+      setUploading(false);
     }
   };
+  const working = busy || uploading;
   const actions = (
     <>
       <span
         className={`save-state ${status === "error" ? "failed" : ""}`}
         role="status"
       >
-        {status === "saved" ? (
-          <Check size={14} />
-        ) : status === "error" ? null : (
+        {working || status === "pending" || status === "saving" ? (
           <LoaderCircle size={14} className="spin" />
-        )}
-        {status === "saved"
-          ? "已保存"
-          : status === "error"
-            ? "保存失败"
-            : "正在保存…"}
+        ) : status === "saved" ? (
+          <Check size={14} />
+        ) : null}
+        {working
+          ? "正在处理…"
+          : status === "saved"
+            ? "已保存"
+            : status === "error"
+              ? "保存失败"
+              : "正在保存…"}
       </span>
       {admin ? (
-        <>
-          <button
-            className="button"
-            disabled={!content}
-            aria-label={content?.svg ? "替换 SVG" : "上传 SVG"}
-            title={content?.svg ? "替换 SVG" : "上传 SVG"}
-            onClick={() => svgInput.current?.click()}
-          >
-            <Upload size={17} />
-            <span>{content?.svg ? "替换 SVG" : "上传 SVG"}</span>
-          </button>
-          <a
-            className="button"
-            href="/"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="打开显示页"
-            title="打开显示页"
-          >
-            <ExternalLink size={19} />
-            <span>打开显示页</span>
-          </a>
-        </>
+        <a
+          className="button"
+          href="/"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="打开显示页"
+          title="打开显示页"
+        >
+          <ExternalLink size={19} />
+          <span>打开显示页</span>
+        </a>
       ) : (
         <a
           className="button"
@@ -94,13 +88,13 @@ export default function App() {
     </>
   );
   return (
-    <div className={`app ${admin ? "admin" : "display"}`}>
+    <div className={`app ${admin ? "admin" : "display"}`} aria-busy={working}>
       {(error || message) && (
         <div className="error-banner" role="alert">
           <span>{message || error}</span>
           {message ? (
             <button onClick={() => setMessage("")}>关闭</button>
-          ) : content ? (
+          ) : status === "error" ? (
             <button onClick={() => void flush().catch(() => {})}>
               重试保存
             </button>
@@ -109,20 +103,36 @@ export default function App() {
           )}
         </div>
       )}
-      {!content ? (
+      {!gallery ? (
         <div className="loading">
-          {error ? "暂时无法加载内容" : "正在加载…"}
+          {error ? "暂时无法加载图片" : "正在加载…"}
         </div>
       ) : (
-        <SvgViewer
-          svg={content.svg}
-          labels={content.labels}
-          onLabelsChange={(labels) => update({ labels })}
-          onEditingChange={setEditing}
-          actions={actions}
-          admin={admin}
-          onUpload={() => svgInput.current?.click()}
-        />
+        <div className="workspace" inert={working}>
+          <SvgViewer
+            key={content?.id || "empty"}
+            ref={viewer}
+            svg={content?.svg || null}
+            name={content?.name}
+            labels={content?.labels || []}
+            onLabelsChange={update}
+            onEditingChange={setEditing}
+            actions={actions}
+            admin={admin}
+            onUpload={() => svgInput.current?.click()}
+            library={
+              <ImageLibrary
+                gallery={gallery}
+                current={content}
+                admin={admin}
+                onOpen={open}
+                onAdd={() => svgInput.current?.click()}
+                onRename={rename}
+                onDelete={remove}
+              />
+            }
+          />
+        </div>
       )}
       {admin && (
         <input

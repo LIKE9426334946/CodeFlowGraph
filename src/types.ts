@@ -1,10 +1,22 @@
 export type TextFile = { name: string; content: string };
 export type Content = {
-  schemaVersion: 3;
+  id: string;
+  name: string;
   revision: number;
+  createdAt: string;
   updatedAt: string;
-  svg: TextFile | null;
+  svg: TextFile;
   labels: SvgLabel[];
+};
+export type ImageSummary = Omit<Content, "svg" | "labels"> & {
+  labelCount: number;
+};
+export type Gallery = {
+  schemaVersion: 4;
+  revision: number;
+  activeImageId: string | null;
+  images: ImageSummary[];
+  updatedAt: string;
 };
 export type SvgLabel = {
   id: string;
