@@ -21,6 +21,27 @@ async function saved(page: Page) {
 async function content(page: Page) {
   return (await page.request.get("/api/content")).json();
 }
+async function verticalEdges(page: Page) {
+  const viewport = page.locator(".svg-viewport");
+  const box = (await viewport.boundingBox())!;
+  await viewport.evaluate((e) => {
+    e.scrollTop = 0;
+  });
+  expect(
+    Math.abs((await page.locator("#display-svg").boundingBox())!.y - box.y),
+  ).toBeLessThan(1);
+  await viewport.evaluate((e) => {
+    e.scrollTop = e.scrollHeight;
+  });
+  const drawing = (await page.locator("#display-svg").boundingBox())!;
+  const height = await viewport.evaluate((e) => e.clientHeight);
+  expect(Math.abs(drawing.y + drawing.height - box.y - height)).toBeLessThan(
+    1.5,
+  );
+  await viewport.evaluate((e) => {
+    e.scrollTop = 0;
+  });
+}
 async function point(page: Page, x: number, y: number) {
   return page.locator("#label-overlay").evaluate(
     (e, p) => {
@@ -65,18 +86,29 @@ test("full-page SVG supports create/edit/drag/zoom/sync/delete labels without re
   await seed(page);
   await page.goto("/admin");
   await expect(page.locator(".cm-editor, .code-pane")).toHaveCount(0);
-  await page
-    .locator('input[type="file"]')
-    .setInputFiles({
-      name: "network.svg",
-      mimeType: "image/svg+xml",
-      buffer: Buffer.from(svg),
-    });
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "network.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(svg),
+  });
   await saved(page);
   await page.goto("/");
   await expect(page.locator("#display-svg")).toBeVisible();
-  expect((await page.locator(".svg-viewport").boundingBox())!.width).toBe(1440);
-  expect((await page.locator(".svg-viewport").boundingBox())!.height).toBe(960);
+  const sidebar = (await page
+    .getByRole("complementary", { name: "图片工具栏" })
+    .boundingBox())!;
+  const canvas = (await page.locator(".svg-viewport").boundingBox())!;
+  expect(sidebar.x).toBe(0);
+  expect(sidebar.height).toBe(960);
+  expect(canvas.x).toBe(sidebar.width);
+  expect(canvas.width + sidebar.width).toBe(1440);
+  expect(canvas.height).toBe(960);
+  await verticalEdges(page);
+  // Zooming out must not retain the unscaled SVG box as blank scrolling space.
+  await page.getByRole("button", { name: "恢复 100%" }).click();
+  await page.getByRole("button", { name: "缩小图片" }).click();
+  await verticalEdges(page);
+  await page.getByRole("button", { name: "适应宽度" }).click();
   await expect(page.locator("input[type=file], .cm-editor")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /代码|分屏|上传/ }),
@@ -153,13 +185,11 @@ test("full-page SVG supports create/edit/drag/zoom/sync/delete labels without re
   await addLabel(page, "旧图标签");
   await page.goto("/admin");
   page.once("dialog", (dialog) => dialog.accept());
-  await page
-    .locator('input[type="file"]')
-    .setInputFiles({
-      name: "replacement.svg",
-      mimeType: "image/svg+xml",
-      buffer: Buffer.from(svg.replace("Attention", "Replaced")),
-    });
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "replacement.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(svg.replace("Attention", "Replaced")),
+  });
   await saved(page);
   await expect(page.locator("[data-label-id]")).toHaveCount(0);
   expect(errors).toEqual([]);
@@ -227,6 +257,7 @@ test("tablet taps place labels; touch drag, pinch and scrolling keep original SV
   await page.setViewportSize({ width: 820, height: 1180 });
   await page.getByRole("button", { name: "适应宽度" }).click();
   await alignment(page, moved);
+  await verticalEdges(page);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -238,4 +269,51 @@ test("tablet taps place labels; touch drag, pinch and scrolling keep original SV
   );
   expect((await content(page)).labels[0]).toEqual(moved);
   await context.close();
+});
+
+test("short SVG stays at the top without a blank vertical scroll range on smaller screens", async ({
+  page,
+}) => {
+  await seed(page);
+  const current = await content(page);
+  await page.request.patch("/api/content", {
+    data: {
+      revision: current.revision,
+      svg: {
+        name: "short.svg",
+        content:
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 500 600 200"><rect x="-100" y="500" width="600" height="200" fill="#e8edf9"/></svg>',
+      },
+    },
+  });
+  await page.goto("/admin");
+  await expect(page.locator("#display-svg")).toBeVisible();
+  for (const size of [
+    { width: 820, height: 1180 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.getByRole("button", { name: "适应宽度" }).click();
+    const viewport = page.locator(".svg-viewport");
+    const box = (await viewport.boundingBox())!;
+    expect(
+      Math.abs((await page.locator("#display-svg").boundingBox())!.y - box.y),
+    ).toBeLessThan(1);
+    await viewport.evaluate((e) => {
+      e.scrollTop = 10000;
+    });
+    expect(await viewport.evaluate((e) => e.scrollTop)).toBe(0);
+    const sidebar = page.getByRole("complementary", { name: "图片工具栏" });
+    await expect(
+      sidebar.getByRole("button", { name: "添加标签", exact: true }),
+    ).toBeVisible();
+    await expect(
+      sidebar.getByRole("button", { name: "替换 SVG" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
 });

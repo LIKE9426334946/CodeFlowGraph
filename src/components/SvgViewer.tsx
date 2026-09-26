@@ -211,7 +211,6 @@ export function SvgViewer({
     document.fonts.addEventListener("loadingdone", renderLabels);
     let scale = 1,
       offsetX = 0,
-      offsetY = 0,
       autoFit = true,
       frame = 0;
     let camera: Camera | null = null;
@@ -220,23 +219,22 @@ export function SvgViewer({
       scale,
       centerX:
         bounds.x + (view.scrollLeft + view.clientWidth / 2 - offsetX) / scale,
-      centerY:
-        bounds.y + (view.scrollTop + view.clientHeight / 2 - offsetY) / scale,
+      centerY: bounds.y + (view.scrollTop + view.clientHeight / 2) / scale,
     });
     const position = (next: Camera) => {
       if (!view.clientWidth || !view.clientHeight) return;
       scale = clampScale(next.scale);
       offsetX = view.clientWidth;
-      offsetY = view.clientHeight;
       host.style.width = `${bounds.width * scale + offsetX * 2}px`;
-      host.style.height = `${bounds.height * scale + offsetY * 2}px`;
+      // Vertical scrolling stops at the drawing edges, without canvas padding.
+      host.style.height = `${bounds.height * scale}px`;
       scene.style.left = `${offsetX}px`;
-      scene.style.top = `${offsetY}px`;
+      scene.style.top = "0";
       scene.style.transform = `scale(${scale})`;
       view.scrollLeft =
         (next.centerX - bounds.x) * scale + offsetX - view.clientWidth / 2;
       view.scrollTop =
-        (next.centerY - bounds.y) * scale + offsetY - view.clientHeight / 2;
+        (next.centerY - bounds.y) * scale - view.clientHeight / 2;
       if (percent.current)
         percent.current.textContent = `${(scale * 100).toFixed(scale < 0.1 ? 1 : 0)}%`;
       camera = readCamera();
@@ -244,17 +242,10 @@ export function SvgViewer({
     const fit = () => {
       autoFit = true;
       const k = clampScale((view.clientWidth - 48) / bounds.width);
-      const inset =
-        (view.parentElement
-          ?.querySelector(".viewer-tools")
-          ?.getBoundingClientRect().height || 56) + 32;
       position({
         scale: k,
         centerX: bounds.x + bounds.width / 2,
-        centerY:
-          bounds.height * k < view.clientHeight - inset * 2
-            ? bounds.y + bounds.height / 2
-            : bounds.y + (view.clientHeight / 2 - inset) / k,
+        centerY: bounds.y + view.clientHeight / (2 * k),
       });
     };
     const zoomAt = (next: number, x: number, y: number) => {
@@ -570,7 +561,7 @@ export function SvgViewer({
   };
   return (
     <main className="svg-viewer">
-      <div className="viewer-tools" aria-label="图片工具栏">
+      <aside className="viewer-tools" aria-label="图片工具栏">
         <a
           className="brand"
           href={admin ? "/admin" : "/"}
@@ -586,6 +577,8 @@ export function SvgViewer({
           className={`button add-label ${placing ? "active" : ""}`}
           disabled={!svg || labels.length >= 1000}
           aria-pressed={placing}
+          aria-label={placing ? "取消添加" : "添加标签"}
+          title={placing ? "取消添加" : "添加标签"}
           onClick={() => {
             setEditor(null);
             setPlacing(!placing);
@@ -595,37 +588,41 @@ export function SvgViewer({
           <span>{placing ? "取消添加" : "添加标签"}</span>
         </button>
         <div className="tool-divider" />
-        <button
-          className="icon-button"
-          disabled={!svg}
-          aria-label="缩小图片"
-          title="缩小图片"
-          onClick={() => controls.current?.zoom(1 / 1.2)}
-        >
-          <Minus size={18} />
-        </button>
-        <button
-          className="zoom-label"
-          disabled={!svg}
-          ref={percent}
-          title="恢复 100%"
-          aria-label="恢复 100%"
-          onClick={() => controls.current?.actual()}
-        >
-          100%
-        </button>
-        <button
-          className="icon-button"
-          disabled={!svg}
-          aria-label="放大图片"
-          title="放大图片"
-          onClick={() => controls.current?.zoom(1.2)}
-        >
-          <Plus size={18} />
-        </button>
+        <div className="zoom-controls" aria-label="缩放控制">
+          <button
+            className="icon-button"
+            disabled={!svg}
+            aria-label="缩小图片"
+            title="缩小图片"
+            onClick={() => controls.current?.zoom(1 / 1.2)}
+          >
+            <Minus size={18} />
+          </button>
+          <button
+            className="zoom-label"
+            disabled={!svg}
+            ref={percent}
+            title="恢复 100%"
+            aria-label="恢复 100%"
+            onClick={() => controls.current?.actual()}
+          >
+            100%
+          </button>
+          <button
+            className="icon-button"
+            disabled={!svg}
+            aria-label="放大图片"
+            title="放大图片"
+            onClick={() => controls.current?.zoom(1.2)}
+          >
+            <Plus size={18} />
+          </button>
+        </div>
         <button
           className="button fit-button"
           disabled={!svg}
+          aria-label="适应宽度"
+          title="适应宽度"
           onClick={() => controls.current?.fit()}
         >
           <Scan size={17} />
@@ -633,134 +630,137 @@ export function SvgViewer({
         </button>
         {document.fullscreenEnabled && (
           <button
-            className="icon-button fullscreen-button"
+            className="button fullscreen-button"
             aria-label={fullscreen ? "退出浏览器全屏" : "进入浏览器全屏"}
             title={fullscreen ? "退出浏览器全屏" : "进入浏览器全屏"}
             onClick={() => void toggleFullscreen()}
           >
             {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+            <span>{fullscreen ? "退出全屏" : "浏览器全屏"}</span>
           </button>
         )}
         <div className="toolbar-actions">{actions}</div>
-      </div>
-      {svg ? (
-        <div
-          ref={viewport}
-          className={`svg-viewport ${placing ? "placing" : ""}`}
-          tabIndex={0}
-          aria-label="SVG 查看区域"
-        >
-          <div ref={surface} className="svg-surface" />
-        </div>
-      ) : (
-        <div className="empty-svg">
-          <Image size={46} strokeWidth={1.2} />
-          <p>上传一张 SVG，开始标注</p>
-          {admin ? (
-            <button className="button" onClick={onUpload}>
-              上传 SVG
-            </button>
-          ) : (
-            <a className="button" href="/admin">
-              前往管理页上传
-            </a>
-          )}
-        </div>
-      )}
-      {placing && (
-        <div className="placement-hint" role="status">
-          点击图片中的位置，输入标签文字
-          <button
-            className="icon-button"
-            aria-label="取消添加标签"
-            onClick={() => setPlacing(false)}
+      </aside>
+      <div className="viewer-canvas">
+        {svg ? (
+          <div
+            ref={viewport}
+            className={`svg-viewport ${placing ? "placing" : ""}`}
+            tabIndex={0}
+            aria-label="SVG 查看区域"
           >
-            <X size={17} />
-          </button>
-        </div>
-      )}
-      {error && (
-        <div className="viewer-error" role="alert">
-          {error}
-          <button
-            className="icon-button"
-            aria-label="关闭提示"
-            onClick={() => setError("")}
-          >
-            <X size={17} />
-          </button>
-        </div>
-      )}
-      {editor && (
-        <form
-          className="label-editor"
-          aria-label={editor.isNew ? "添加标签" : "编辑标签"}
-          onSubmit={(e) => {
-            e.preventDefault();
-            saveLabel();
-          }}
-        >
-          <div className="editor-heading">
-            <label htmlFor="label-text">
-              {editor.isNew ? "添加标签" : "编辑标签"}
-            </label>
+            <div ref={surface} className="svg-surface" />
+          </div>
+        ) : (
+          <div className="empty-svg">
+            <Image size={46} strokeWidth={1.2} />
+            <p>上传一张 SVG，开始标注</p>
+            {admin ? (
+              <button className="button" onClick={onUpload}>
+                上传 SVG
+              </button>
+            ) : (
+              <a className="button" href="/admin">
+                前往管理页上传
+              </a>
+            )}
+          </div>
+        )}
+        {placing && (
+          <div className="placement-hint" role="status">
+            点击图片中的位置，输入标签文字
             <button
-              type="button"
               className="icon-button"
-              aria-label="取消编辑标签"
-              onClick={() => setEditor(null)}
+              aria-label="取消添加标签"
+              onClick={() => setPlacing(false)}
             >
               <X size={17} />
             </button>
           </div>
-          <textarea
-            id="label-text"
-            aria-label="标签文字"
-            value={editor.label.text}
-            autoFocus
-            maxLength={1000}
-            rows={3}
-            placeholder="输入标签文字…"
-            onChange={(e) =>
-              setEditor({
-                ...editor,
-                label: { ...editor.label, text: e.target.value },
-              })
-            }
-            onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                e.preventDefault();
-                saveLabel();
-              }
-            }}
-          />
-          <div className="editor-actions">
-            {!editor.isNew && (
-              <button
-                type="button"
-                className="button delete-label"
-                onClick={() => {
-                  onLabelsChange(
-                    labels.filter((label) => label.id !== editor.label.id),
-                  );
-                  setEditor(null);
-                }}
-              >
-                <Trash2 size={16} />
-                删除
-              </button>
-            )}
-            <span>拖动标签可调整位置</span>
+        )}
+        {error && (
+          <div className="viewer-error" role="alert">
+            {error}
             <button
-              type="submit"
-              className="button primary"
-              disabled={!editor.label.text.trim()}
+              className="icon-button"
+              aria-label="关闭提示"
+              onClick={() => setError("")}
             >
-              保存标签
+              <X size={17} />
             </button>
           </div>
-        </form>
-      )}
+        )}
+        {editor && (
+          <form
+            className="label-editor"
+            aria-label={editor.isNew ? "添加标签" : "编辑标签"}
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveLabel();
+            }}
+          >
+            <div className="editor-heading">
+              <label htmlFor="label-text">
+                {editor.isNew ? "添加标签" : "编辑标签"}
+              </label>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="取消编辑标签"
+                onClick={() => setEditor(null)}
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <textarea
+              id="label-text"
+              aria-label="标签文字"
+              value={editor.label.text}
+              autoFocus
+              maxLength={1000}
+              rows={3}
+              placeholder="输入标签文字…"
+              onChange={(e) =>
+                setEditor({
+                  ...editor,
+                  label: { ...editor.label, text: e.target.value },
+                })
+              }
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  saveLabel();
+                }
+              }}
+            />
+            <div className="editor-actions">
+              {!editor.isNew && (
+                <button
+                  type="button"
+                  className="button delete-label"
+                  onClick={() => {
+                    onLabelsChange(
+                      labels.filter((label) => label.id !== editor.label.id),
+                    );
+                    setEditor(null);
+                  }}
+                >
+                  <Trash2 size={16} />
+                  删除
+                </button>
+              )}
+              <span>拖动标签可调整位置</span>
+              <button
+                type="submit"
+                className="button primary"
+                disabled={!editor.label.text.trim()}
+              >
+                保存标签
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </main>
   );
 }

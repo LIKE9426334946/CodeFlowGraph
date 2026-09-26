@@ -61,13 +61,15 @@ export default function App() {
           <button
             className="button"
             disabled={!content}
+            aria-label={content?.svg ? "替换 SVG" : "上传 SVG"}
+            title={content?.svg ? "替换 SVG" : "上传 SVG"}
             onClick={() => svgInput.current?.click()}
           >
             <Upload size={17} />
             <span>{content?.svg ? "替换 SVG" : "上传 SVG"}</span>
           </button>
           <a
-            className="icon-button"
+            className="button"
             href="/"
             target="_blank"
             rel="noopener noreferrer"
@@ -75,16 +77,18 @@ export default function App() {
             title="打开显示页"
           >
             <ExternalLink size={19} />
+            <span>打开显示页</span>
           </a>
         </>
       ) : (
         <a
-          className="icon-button"
+          className="button"
           href="/admin"
           aria-label="管理图片"
           title="管理图片"
         >
           <Settings2 size={19} />
+          <span>管理图片</span>
         </a>
       )}
     </>

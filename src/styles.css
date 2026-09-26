@@ -64,33 +64,47 @@ svg {
   flex-direction: column;
 }
 .svg-viewer {
+  --sidebar-width: 196px;
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  overflow: hidden;
+}
+.viewer-tools {
+  position: relative;
+  z-index: 5;
+  min-height: 0;
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  background: white;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.viewer-canvas {
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
-.viewer-tools {
-  position: absolute;
-  z-index: 5;
-  top: 12px;
-  left: 14px;
-  right: 14px;
-  min-height: 58px;
-  padding: 6px 9px;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  background: #fffffff5;
-  border: 1px solid #e0e5ece8;
-  border-radius: 10px;
-  box-shadow: 0 3px 14px #2630430c;
+.viewer-tools > .button,
+.toolbar-actions > .button {
+  justify-content: flex-start;
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px 0 6px;
+  min-height: 30px;
+  padding: 0 4px;
   white-space: nowrap;
 }
 .brand svg {
@@ -102,13 +116,10 @@ svg {
   letter-spacing: -0.3px;
 }
 .file-name {
-  flex: 1;
   min-width: 0;
-  max-width: 380px;
-  padding: 0 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 0 4px 10px;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
   font-size: 12px;
   color: var(--muted);
 }
@@ -137,7 +148,7 @@ svg {
 .zoom-label {
   font-family: Consolas, monospace;
   font-size: 12px;
-  min-width: 57px;
+  min-width: 0;
 }
 .add-label {
   color: var(--accent);
@@ -158,30 +169,41 @@ svg {
   background: #5644b9;
 }
 .tool-divider {
-  width: 1px;
-  height: 23px;
+  height: 1px;
+  flex-shrink: 0;
   background: var(--line);
-  margin: 0 5px;
+  margin: 3px 0;
 }
-.fit-button {
+.zoom-controls {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.fit-button,
+.fullscreen-button {
   border: 0;
   background: transparent;
 }
 .toolbar-actions {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 20px;
 }
 .save-state {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 5px;
   white-space: nowrap;
   color: var(--muted);
   font-size: 12px;
   min-width: 70px;
+  padding: 0 8px 3px;
 }
 .save-state > svg {
   color: #5a9c7c;
@@ -193,6 +215,7 @@ svg {
   position: relative;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: auto;
   touch-action: none;
   overscroll-behavior: contain;
@@ -210,6 +233,8 @@ svg {
   position: relative;
   min-width: 100%;
   min-height: 100%;
+  /* Unscaled SVG layout boxes must not add a blank scroll tail after zooming out. */
+  overflow: hidden;
 }
 .empty-svg {
   flex: 1;
@@ -227,7 +252,7 @@ svg {
 .viewer-error {
   position: absolute;
   z-index: 6;
-  top: 82px;
+  top: 16px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -345,61 +370,83 @@ svg {
 .svg-viewport::-webkit-scrollbar-corner {
   background: #f3f5f8;
 }
-@media (max-width: 1150px) {
-  .file-name {
-    padding: 0 6px;
-  }
-  .admin .brand strong {
-    display: none;
-  }
-}
 @media (max-width: 920px) {
-  .brand strong,
-  .file-name {
-    display: none;
+  .svg-viewer {
+    --sidebar-width: 176px;
   }
   .viewer-tools {
-    left: 10px;
-    right: 10px;
-    padding: 5px;
+    padding: 16px 10px;
   }
   .brand {
-    padding: 0 7px;
+    padding: 0;
+    gap: 6px;
+  }
+  .brand strong {
+    font-size: 13px;
   }
 }
-@media (max-width: 700px) {
-  .fit-button span {
-    display: none;
-  }
-  .fit-button {
-    width: 44px;
-    padding: 0;
+@media (max-width: 600px) {
+  .svg-viewer {
+    --sidebar-width: 72px;
   }
   .viewer-tools {
-    flex-wrap: wrap;
-    gap: 2px;
+    padding: 12px 6px;
+    gap: 10px;
   }
-  .toolbar-actions {
-    gap: 2px;
+  .brand {
+    justify-content: center;
   }
-  .tool-divider {
+  .brand strong,
+  .file-name,
+  .viewer-tools .button > span {
     display: none;
   }
+  .viewer-tools > .button,
+  .toolbar-actions > .button {
+    justify-content: center;
+    padding: 0;
+  }
+  .zoom-controls {
+    display: flex;
+    flex-direction: column;
+  }
+  .zoom-label {
+    width: 100%;
+  }
   .save-state {
-    font-size: 11px;
-    min-width: 58px;
+    padding: 0;
+    min-width: 0;
+    justify-content: center;
+    flex-wrap: wrap;
+    font-size: 10px;
+    gap: 3px;
+  }
+  .save-state > svg {
+    display: none;
   }
   .placement-hint,
   .viewer-error {
-    top: 126px;
+    white-space: normal;
     font-size: 12px;
+    gap: 0;
+    padding-left: 10px;
   }
   .label-editor {
-    right: 16px;
-    bottom: 16px;
+    right: 12px;
+    bottom: 12px;
+    max-width: calc(100% - 24px);
+    padding: 8px 12px 12px;
+  }
+  .editor-actions {
+    flex-wrap: wrap;
+    gap: 4px;
   }
   .editor-actions > span {
-    font-size: 10px;
+    flex-basis: 100%;
+    order: 3;
+  }
+  .editor-actions > .primary {
+    margin-left: auto;
   }
 }
 @media (prefers-reduced-motion: reduce) {
