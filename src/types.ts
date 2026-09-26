@@ -2,6 +2,7 @@ export type TextFile = { name: string; content: string };
 export type Content = {
   id: string;
   name: string;
+  locked: boolean;
   revision: number;
   createdAt: string;
   updatedAt: string;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Image, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Image, Lock, Pencil, Plus, Trash2, X } from "lucide-react";
 import type { Content, Gallery } from "../types";
 
 type Props = {
@@ -47,12 +47,16 @@ export function ImageLibrary({
           <button
             key={image.id}
             className={`image-item ${image.id === current?.id ? "selected" : ""}`}
-            title={`${image.name} · ${image.labelCount} 个标签`}
+            title={`${image.name} · ${image.labelCount} 个标签${image.locked ? " · 已锁定" : ""}`}
             aria-label={`打开图片：${image.name}`}
             aria-pressed={image.id === current?.id}
             onClick={() => void onOpen(image.id).catch(() => {})}
           >
-            <Image size={15} />
+            {admin && image.locked ? (
+              <Lock size={15} aria-label="图片已锁定" />
+            ) : (
+              <Image size={15} />
+            )}
             <span>{image.name}</span>
           </button>
         ))}

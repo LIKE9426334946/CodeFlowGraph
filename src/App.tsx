@@ -22,6 +22,7 @@ export default function App() {
     add,
     rename,
     remove,
+    setLocked,
   } = useContent(beforeChange);
   const [message, setMessage] = useState(""),
     [uploading, setUploading] = useState(false),
@@ -116,8 +117,10 @@ export default function App() {
             svg={content?.svg || null}
             name={content?.name}
             labels={content?.labels || []}
+            imageLocked={content?.locked || false}
+            onImageLockChange={setLocked}
             onLabelsChange={(labels) => {
-              if (admin) update(labels);
+              if (admin && !content?.locked) update(labels);
             }}
             onEditingChange={setEditing}
             actions={actions}

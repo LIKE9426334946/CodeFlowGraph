@@ -23,6 +23,69 @@ const label = {
   fontSize: 18,
 };
 
+test("image locks survive restart and reject all label writes until explicitly unlocked", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "cfg-image-lock-"));
+  try {
+    const initial = createStore(dir);
+    const { image: a } = await initial.create({
+      svg: { name: "a.svg", content: svg },
+      labels: [label],
+    });
+    const { image: b } = await initial.create({
+      svg: { name: "b.svg", content: svg },
+    });
+    assert.equal(a.locked, false);
+    assert.equal(b.locked, false);
+    // Galleries saved by older versions have no lock field.
+    const file = path.join(dir, "gallery.json");
+    const legacy = JSON.parse(await readFile(file, "utf8"));
+    legacy.images.forEach((image) => {
+      delete image.locked;
+    });
+    await writeFile(file, JSON.stringify(legacy));
+    const store = createStore(dir);
+    assert.equal((await store.read(a.id)).locked, false);
+    for (const locked of [null, 0, "true"])
+      await assert.rejects(store.save(a.id, { revision: 1, locked }), {
+        status: 400,
+      });
+    const result = await store.save(a.id, { revision: 1, locked: true });
+    assert.equal(result.image.locked, true);
+    assert.equal(
+      result.gallery.images.find((image) => image.id === a.id).locked,
+      true,
+    );
+    const restarted = createStore(dir);
+    assert.equal((await restarted.read(a.id)).locked, true);
+    assert.equal((await restarted.read(b.id)).locked, false);
+    for (const patch of [
+      { labels: [] },
+      { labels: [{ ...label, text: "误改", x: 100 }] },
+      { labels: [label, { ...label, id: "extra" }] },
+      { locked: false, labels: [] },
+    ])
+      await assert.rejects(restarted.save(a.id, { revision: 2, ...patch }), {
+        status: 409,
+        message: /已锁定/,
+      });
+    await assert.rejects(restarted.save(a.id, { revision: 1, labels: [] }), {
+      status: 409,
+    });
+    assert.deepEqual((await restarted.read(a.id)).labels, [label]);
+    assert.equal((await restarted.read(a.id)).revision, 2);
+    await restarted.save(b.id, { revision: 1, labels: [label] });
+    await restarted.save(a.id, { revision: 2, locked: false });
+    const edited = { ...label, text: "解锁后修改", x: 25 };
+    await restarted.save(a.id, { revision: 3, labels: [edited] });
+    const final = await createStore(dir).read(a.id);
+    assert.equal(final.locked, false);
+    assert.deepEqual(final.labels, [edited]);
+    assert.deepEqual((await createStore(dir).read(b.id)).labels, [label]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("gallery API persists independently named images and labels, remembers selection and deletes shared SVG safely", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "cfg-gallery-api-"));
   const server = createApp(dir).listen(0, "127.0.0.1");

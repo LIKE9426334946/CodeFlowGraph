@@ -142,6 +142,7 @@ function validateName(name) {
 const imageSummary = ({
   id,
   name,
+  locked,
   revision,
   createdAt,
   updatedAt,
@@ -149,6 +150,7 @@ const imageSummary = ({
 }) => ({
   id,
   name,
+  locked,
   revision,
   createdAt,
   updatedAt,
@@ -193,6 +195,11 @@ export function createStore(dataDir) {
     try {
       const gallery = await readJSON(metadataPath);
       if (gallery.schemaVersion !== 4) throw new Error("不支持的图片库版本");
+      // Existing galleries predate label locking; keep those images editable.
+      gallery.images = gallery.images.map((image) => ({
+        ...image,
+        locked: image.locked === true,
+      }));
       return gallery;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
@@ -228,6 +235,7 @@ export function createStore(dataDir) {
             old.svg.name.replace(/\.svg$/i, "") || old.svg.name,
           ),
           revision: 1,
+          locked: false,
           svg: await saveSvg(validateFile(old.svg)),
           labels: validateLabels(old.labels || []),
           createdAt: old.updatedAt || now,
@@ -309,6 +317,7 @@ export function createStore(dataDir) {
           id: randomUUID(),
           name,
           revision: 1,
+          locked: false,
           svg: await saveSvg(svg),
           labels,
           createdAt: now,
@@ -339,12 +348,18 @@ export function createStore(dataDir) {
         checkRevision(image, input);
         if (
           Object.keys(input).some(
-            (key) => !["revision", "name", "labels"].includes(key),
+            (key) => !["revision", "name", "labels", "locked"].includes(key),
           )
         )
-          throw new HttpError(400, "仅支持修改图片名称和标签");
+          throw new HttpError(400, "仅支持修改图片名称、标签和锁定状态");
+        if (Object.hasOwn(input, "locked") && typeof input.locked !== "boolean")
+          throw new HttpError(400, "图片锁定状态需要为布尔值");
+        // Unlock separately before changing labels, including from stale pages.
+        if (image.locked && Object.hasOwn(input, "labels"))
+          throw new HttpError(409, "图片已锁定，请先解锁图片再修改标签");
         const updated = {
           ...image,
+          locked: input.locked ?? image.locked,
           name: Object.hasOwn(input, "name")
             ? validateName(input.name)
             : image.name,

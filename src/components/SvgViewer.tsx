@@ -45,6 +45,8 @@ type Props = {
   svg: TextFile | null;
   name?: string;
   labels: SvgLabel[];
+  imageLocked: boolean;
+  onImageLockChange: (locked: boolean) => Promise<void>;
   onLabelsChange: (labels: SvgLabel[]) => void;
   onEditingChange: (editing: boolean) => void;
   actions: ReactNode;
@@ -61,6 +63,8 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     svg,
     name,
     labels,
+    imageLocked,
+    onImageLockChange,
     onLabelsChange,
     onEditingChange,
     actions,
@@ -83,18 +87,33 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
   const [editor, setEditor] = useState<Editor | null>(null),
     [fullscreen, setFullscreen] = useState(false),
     [zoomLocked, setZoomLocked] = useState(false);
+  const canEditLabels = admin && !imageLocked;
   const latest = useRef({
+    canEditLabels,
     labels,
     onLabelsChange,
     onEditingChange,
     placing,
     editor,
   });
-  latest.current = { labels, onLabelsChange, onEditingChange, placing, editor };
+  latest.current = {
+    canEditLabels,
+    labels,
+    onLabelsChange,
+    onEditingChange,
+    placing,
+    editor,
+  };
   useEffect(() => {
-    onEditingChange(placing || !!editor);
+    onEditingChange(canEditLabels && (placing || !!editor));
     redraw.current?.();
-  }, [labels, placing, editor, onEditingChange]);
+  }, [labels, placing, editor, onEditingChange, canEditLabels]);
+  useEffect(() => {
+    if (!canEditLabels) {
+      setEditor(null);
+      setPlacing(false);
+    }
+  }, [canEditLabels]);
   useEffect(() => {
     const changed = () => setFullscreen(!!document.fullscreenElement);
     const escape = (e: KeyboardEvent) => {
@@ -157,16 +176,18 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     const measure = document.createElement("canvas").getContext("2d");
     const renderLabels = () => {
       const state = latest.current;
+      overlay.style.pointerEvents = state.canEditLabels ? "auto" : "none";
       const fontFamily = getComputedStyle(host).fontFamily;
-      const visible = state.editor?.isNew
-        ? [
-            ...state.labels,
-            {
-              ...state.editor.label,
-              text: state.editor.label.text || "输入标签",
-            },
-          ]
-        : state.labels;
+      const visible =
+        state.canEditLabels && state.editor?.isNew
+          ? [
+              ...state.labels,
+              {
+                ...state.editor.label,
+                text: state.editor.label.text || "输入标签",
+              },
+            ]
+          : state.labels;
       const ids = new Set(visible.map((label) => label.id));
       for (const [id, group] of groups)
         if (!ids.has(id)) {
@@ -178,15 +199,16 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
         if (!group) {
           group = svgElement("g", {
             "data-label-id": label.id,
-            role: admin ? "button" : "img",
           });
-          if (admin) group.setAttribute("tabindex", "0");
-          group.style.cssText = admin
-            ? "cursor:move;outline:none"
-            : "pointer-events:none";
           overlay.append(group);
           groups.set(label.id, group);
         }
+        group.setAttribute("role", state.canEditLabels ? "button" : "img");
+        if (state.canEditLabels) group.setAttribute("tabindex", "0");
+        else group.removeAttribute("tabindex");
+        group.style.cssText = state.canEditLabels
+          ? "cursor:move;outline:none"
+          : "pointer-events:none";
         const f = label.fontSize,
           pad = f * 0.65;
         if (measure) measure.font = `${f}px ${fontFamily}`;
@@ -206,7 +228,8 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
         }
         const width = Math.max(f * 2, ...lines.map(widthOf)) + pad * 2;
         const height = Math.max(f * 2.45, lines.length * f * 1.4 + pad * 2);
-        const selected = state.editor?.label.id === label.id;
+        const selected =
+          state.canEditLabels && state.editor?.label.id === label.id;
         const rect = svgElement("rect", {
           width,
           height,
@@ -344,7 +367,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       null;
     let moveEvent: PointerEvent | null = null;
     const labelAt = (e: Event) => {
-      if (!admin) return;
+      if (!latest.current.canEditLabels) return;
       const element = e
         .composedPath()
         .find(
@@ -387,7 +410,11 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
           start: { x: e.clientX, y: e.clientY },
           moved: false,
         };
-        if (admin && latest.current.placing && e.button === 0)
+        if (
+          latest.current.canEditLabels &&
+          latest.current.placing &&
+          e.button === 0
+        )
           gesture = { ...base, kind: "place" };
         else if (label && e.button === 0)
           gesture = {
@@ -440,7 +467,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
           view.scrollLeft = gesture.left - dx;
           view.scrollTop = gesture.top - dy;
           camera = readCamera();
-        } else if (gesture.kind === "label") {
+        } else if (gesture.kind === "label" && latest.current.canEditLabels) {
           const p = clientToSvg(overlay, e.clientX, e.clientY);
           gesture.next = {
             x: Math.max(
@@ -487,7 +514,11 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       moveEvent = null;
       if (!cancelled && gesture?.id === e.pointerId) applyMove(e);
       let opensEditor = false;
-      if (!cancelled && gesture?.id === e.pointerId) {
+      if (
+        !cancelled &&
+        gesture?.id === e.pointerId &&
+        latest.current.canEditLabels
+      ) {
         if (gesture.kind === "label") {
           const { label, moved, next } = gesture;
           if (moved) {
@@ -602,7 +633,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     };
   }, [svg?.content, admin]);
   const saveLabel = () => {
-    if (!admin || !editor?.label.text.trim()) return;
+    if (!canEditLabels || !editor?.label.text.trim()) return;
     const label = { ...editor.label, text: editor.label.text.trim() };
     if (editor.isNew) onLabelsChange([...labels, label]);
     else
@@ -615,8 +646,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
   };
   useImperativeHandle(ref, () => ({
     finishEditing() {
-      if (!admin) return;
-      if (editor?.label.text.trim()) saveLabel();
+      if (canEditLabels && editor?.label.text.trim()) saveLabel();
       else setEditor(null);
       setPlacing(false);
       onEditingChange(false);
@@ -666,12 +696,30 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
         {admin && (
           <>
             <button
+              className={`button image-lock ${imageLocked ? "active" : ""}`}
+              disabled={!svg}
+              aria-pressed={imageLocked}
+              aria-label={imageLocked ? "解锁图片" : "锁定图片"}
+              title={
+                imageLocked
+                  ? "图片已锁定，解锁后可编辑标签"
+                  : "锁定图片，防止误改标签"
+              }
+              onClick={() =>
+                void onImageLockChange(!imageLocked).catch(() => {})
+              }
+            >
+              {imageLocked ? <Lock size={17} /> : <Unlock size={17} />}
+              <span>{imageLocked ? "解锁图片" : "锁定图片"}</span>
+            </button>
+            <button
               className={`button add-label ${placing ? "active" : ""}`}
-              disabled={!svg || labels.length >= 1000}
+              disabled={!svg || !canEditLabels || labels.length >= 1000}
               aria-pressed={placing}
               aria-label={placing ? "取消添加" : "添加标签"}
               title={placing ? "取消添加" : "添加标签"}
               onClick={() => {
+                if (!canEditLabels) return;
                 setEditor(null);
                 setPlacing(!placing);
               }}
@@ -772,7 +820,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
             )}
           </div>
         )}
-        {admin && placing && (
+        {canEditLabels && placing && (
           <div className="placement-hint" role="status">
             点击图片中的位置，输入标签文字
             <button
@@ -796,7 +844,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
             </button>
           </div>
         )}
-        {admin && editor && (
+        {canEditLabels && editor && (
           <form
             className="label-editor"
             aria-label={editor.isNew ? "添加标签" : "编辑标签"}
@@ -845,6 +893,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
                   type="button"
                   className="button delete-label"
                   onClick={() => {
+                    if (!canEditLabels) return;
                     onLabelsChange(
                       labels.filter((label) => label.id !== editor.label.id),
                     );

@@ -263,6 +263,213 @@ async function addLabel(page: Page, text: string, touch = false) {
   return (await content(page)).labels.at(-1);
 }
 
+test.describe("image locking", () => {
+  test.use({ hasTouch: true, viewport: { width: 1180, height: 820 } });
+  test("persists per image, protects labels with mouse and touch, and restores editing after unlock", async ({
+    page,
+  }) => {
+    const first = await seed(page);
+    await page.request.post("/api/images", {
+      data: { name: "另一张图", svg: { name: "other.svg", content: svg } },
+    });
+    await page.goto("/admin");
+    await page
+      .getByRole("button", { name: "打开图片：model", exact: true })
+      .click();
+    const label = await addLabel(page, "原始标注");
+    const annotation = page.locator(`[data-label-id="${label.id}"]`);
+    const drawing = page.locator("#display-svg");
+    const viewport = page.locator(".svg-viewport");
+    const scale = () =>
+      drawing.evaluate((e) => (e as SVGSVGElement).getScreenCTM()!.a);
+    await drawing.evaluate((e) => {
+      (window as any).drawingBeforeLock = e;
+    });
+    const beforeLock = await scale();
+    await annotation.click();
+    await page
+      .getByRole("textbox", { name: "标签文字" })
+      .fill("最后修改的标注");
+    await page.getByRole("button", { name: "锁定图片", exact: true }).click();
+    const unlock = page.getByRole("button", { name: "解锁图片", exact: true });
+    await expect(unlock).toHaveAttribute("aria-pressed", "true");
+    await saved(page);
+    const locked = await content(page, first.id);
+    expect(locked.locked).toBe(true);
+    expect(locked.labels).toEqual([{ ...label, text: "最后修改的标注" }]);
+    expect(await scale()).toBeCloseTo(beforeLock, 6);
+    await expect(
+      page.getByRole("button", { name: "添加标签", exact: true }),
+    ).toBeDisabled();
+    await expect(annotation).toHaveAttribute("role", "img");
+    await expect(page.locator("#label-overlay [tabindex]")).toHaveCount(0);
+    await expect(page.locator(".label-editor, .placement-hint")).toHaveCount(0);
+    let box = (await annotation.boundingBox())!;
+    await page.mouse.click(box.x + 12, box.y + 14);
+    await page.mouse.dblclick(box.x + 12, box.y + 14);
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Delete");
+    await page.mouse.move(box.x + 12, box.y + 14);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 28, box.y - 46, { steps: 5 });
+    await page.mouse.up();
+    await expect
+      .poll(() => viewport.evaluate((e) => e.scrollTop))
+      .toBeGreaterThan(50);
+    box = (await annotation.boundingBox())!;
+    await page.touchscreen.tap(box.x + 12, box.y + 14);
+    const cdp = await page.context().newCDPSession(page);
+    const beforePan = await viewport.evaluate((e) => e.scrollTop);
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: box.x + 12, y: box.y + 14, id: 0 }],
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: box.x - 8, y: box.y - 36, id: 0 }],
+    });
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    await expect
+      .poll(() => viewport.evaluate((e) => e.scrollTop))
+      .toBeGreaterThan(beforePan + 40);
+    await alignment(page, label);
+    await page.keyboard.press("Control+s");
+    await saved(page);
+    await expect(page.locator(".label-editor, .placement-hint")).toHaveCount(0);
+    expect(await content(page, first.id)).toEqual(locked);
+    const denied = await page.request.patch(`/api/images/${first.id}`, {
+      data: { revision: locked.revision, labels: [] },
+    });
+    expect(denied.status()).toBe(409);
+    await page.getByRole("button", { name: "放大图片" }).click();
+    await expect.poll(scale).toBeGreaterThan(beforeLock);
+    await page.getByRole("button", { name: "固定缩放", exact: true }).click();
+    await unlock.click();
+    await expect(annotation).toHaveAttribute("role", "button");
+    await expect(
+      page.getByRole("button", { name: "解除固定缩放" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "放大图片" })).toBeDisabled();
+    expect(
+      await drawing.evaluate((e) => e === (window as any).drawingBeforeLock),
+    ).toBe(true);
+    await page.getByRole("button", { name: "解除固定缩放" }).click();
+    await page.getByRole("button", { name: "适应宽度" }).click();
+    await annotation.click();
+    await page.getByRole("textbox", { name: "标签文字" }).fill("解锁后编辑");
+    await page.getByRole("button", { name: "保存标签" }).click();
+    await saved(page);
+    box = (await annotation.boundingBox())!;
+    await page.mouse.move(box.x + 12, box.y + 14);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 42, box.y + 54, { steps: 5 });
+    await page.mouse.up();
+    await saved(page);
+    const edited = (await content(page, first.id)).labels[0];
+    expect(edited.text).toBe("解锁后编辑");
+    expect(edited.x).toBeGreaterThan(label.x);
+    expect(edited.y).toBeGreaterThan(label.y);
+    await annotation.click();
+    await page.getByRole("button", { name: "删除", exact: true }).click();
+    await saved(page);
+    expect((await content(page, first.id)).labels).toEqual([]);
+    const final = await addLabel(page, "终稿");
+    await page.getByRole("button", { name: "锁定图片", exact: true }).click();
+    await expect(unlock).toBeVisible();
+    await page.reload();
+    await expect(unlock).toHaveAttribute("aria-pressed", "true");
+    await page
+      .getByRole("button", { name: "打开图片：另一张图", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "锁定图片", exact: true }),
+    ).toHaveAttribute("aria-pressed", "false");
+    await expect(
+      page.getByRole("button", { name: "添加标签", exact: true }),
+    ).toBeEnabled();
+    await page
+      .getByRole("button", { name: "打开图片：model", exact: true })
+      .click();
+    await expect(unlock).toHaveAttribute("aria-pressed", "true");
+    expect((await content(page, first.id)).labels).toEqual([final]);
+    const other = await page.context().newPage();
+    await other.goto("/admin");
+    await expect(
+      other.getByRole("button", { name: "解锁图片", exact: true }),
+    ).toBeVisible();
+    await unlock.click();
+    await expect(
+      other.getByRole("button", { name: "锁定图片", exact: true }),
+    ).toBeVisible();
+    await expect(
+      other.getByRole("button", { name: "添加标签", exact: true }),
+    ).toBeEnabled();
+    await other.close();
+    await page.goto("/");
+    await expect(page.locator("#display-svg")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /锁定图片|解锁图片/ }),
+    ).toHaveCount(0);
+    await expect(page.locator(`[data-label-id="${final.id}"]`)).toHaveAttribute(
+      "role",
+      "img",
+    );
+  });
+
+  test("failed draft saves or lock requests never falsely lock the image or lose edits", async ({
+    page,
+  }) => {
+    const image = await seed(page);
+    await page.goto("/admin");
+    const label = await addLabel(page, "已保存文字");
+    await page.locator(`[data-label-id="${label.id}"]`).click();
+    await page
+      .getByRole("textbox", { name: "标签文字" })
+      .fill("锁定前待保存文字");
+    const endpoint = `**/api/images/${image.id}`;
+    await page.route(endpoint, (route) =>
+      route.request().method() === "PATCH"
+        ? route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "标签保存失败测试" }),
+          })
+        : route.continue(),
+    );
+    const lock = page.getByRole("button", { name: "锁定图片", exact: true });
+    await lock.click();
+    await expect(page.getByRole("alert")).toContainText("标签保存失败测试");
+    await expect(lock).toHaveAttribute("aria-pressed", "false");
+    expect((await content(page)).locked).toBe(false);
+    expect((await content(page)).labels[0].text).toBe("已保存文字");
+    await page.unroute(endpoint);
+    await page.route(endpoint, (route) =>
+      route.request().method() === "PATCH" &&
+      route.request().postDataJSON().locked === true
+        ? route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "锁定失败测试" }),
+          })
+        : route.continue(),
+    );
+    await lock.click();
+    await expect(page.getByRole("alert")).toContainText("锁定失败测试");
+    await expect(lock).toHaveAttribute("aria-pressed", "false");
+    expect((await content(page)).locked).toBe(false);
+    expect((await content(page)).labels[0].text).toBe("锁定前待保存文字");
+    await page.unroute(endpoint);
+    await lock.click();
+    await expect(
+      page.getByRole("button", { name: "解锁图片", exact: true }),
+    ).toBeVisible();
+    expect((await content(page)).locked).toBe(true);
+  });
+});
+
 test("admin supports create/edit/drag/zoom/sync/delete labels without rebuilding the drawing", async ({
   page,
 }) => {

@@ -101,7 +101,7 @@ export function useContent(beforeChange: () => void) {
     };
   }, [install]);
   const update = useCallback((labels: SvgLabel[]) => {
-    if (!current.current) return;
+    if (!current.current || current.current.locked) return;
     current.current = { ...current.current, labels };
     generation.current++;
     setContent(current.current);
@@ -217,6 +217,19 @@ export function useContent(beforeChange: () => void) {
       }),
     [runAction, install],
   );
+  const setLocked = useCallback(
+    (locked: boolean) =>
+      runAction(async () => {
+        const image = current.current;
+        if (!image) return;
+        const result = await api<SaveResult>(`/images/${image.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ revision: image.revision, locked }),
+        });
+        install(result.gallery, { ...image, ...result.image });
+      }),
+    [runAction, install],
+  );
   useEffect(() => {
     clearTimeout(timer.current);
     if (generation.current > saved.current)
@@ -272,5 +285,6 @@ export function useContent(beforeChange: () => void) {
     add,
     rename,
     remove,
+    setLocked,
   };
 }
