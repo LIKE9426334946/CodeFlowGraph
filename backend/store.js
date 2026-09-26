@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, constants } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -22,8 +22,7 @@ async function atomicJSON(file, value) {
   }
   await fs.rename(temporary, file);
 }
-function validateFile(file, type) {
-  const limit = type === "svg" ? 30_000_000 : 2_000_000;
+function validateFile(file) {
   if (
     !file ||
     typeof file.name !== "string" ||
@@ -33,21 +32,49 @@ function validateFile(file, type) {
     typeof file.content !== "string"
   )
     throw new HttpError(400, "文件格式无效");
-  if (Buffer.byteLength(file.content, "utf8") > limit)
-    throw new HttpError(
-      413,
-      type === "svg" ? "SVG 不能超过 30 MB" : "代码不能超过 2 MB",
-    );
+  if (Buffer.byteLength(file.content, "utf8") > 30_000_000)
+    throw new HttpError(413, "SVG 不能超过 30 MB");
   if (
-    type === "svg" &&
-    (!file.name.toLowerCase().endsWith(".svg") ||
-      !/<svg[\s>]/i.test(file.content))
+    !file.name.toLowerCase().endsWith(".svg") ||
+    !/<svg[\s>]/i.test(file.content)
   )
     throw new HttpError(400, "请选择有效的 SVG 文件");
   return { name: file.name, content: file.content };
 }
 
-// Import the previous active file once. The old project directories stay intact.
+function validateLabels(labels) {
+  if (!Array.isArray(labels) || labels.length > 1000)
+    throw new HttpError(400, "标签数量不能超过 1000 个");
+  const ids = new Set();
+  return labels.map((label) => {
+    if (
+      !label ||
+      !validId(label.id) ||
+      ids.has(label.id) ||
+      typeof label.text !== "string" ||
+      !label.text.trim() ||
+      label.text.length > 1000 ||
+      !Number.isFinite(label.x) ||
+      Math.abs(label.x) > 2e8 ||
+      !Number.isFinite(label.y) ||
+      Math.abs(label.y) > 2e8 ||
+      !Number.isFinite(label.fontSize) ||
+      label.fontSize < 0.01 ||
+      label.fontSize > 100000
+    )
+      throw new HttpError(400, "标签需要有效的文字、坐标和字号");
+    ids.add(label.id);
+    return {
+      id: label.id,
+      text: label.text.trim(),
+      x: label.x,
+      y: label.y,
+      fontSize: label.fontSize,
+    };
+  });
+}
+
+// Import only the previous SVG. Old source files and project folders stay intact.
 async function readLegacy(root) {
   let activeId;
   try {
@@ -89,18 +116,7 @@ async function readLegacy(root) {
     )[0];
   if (!selected) return null;
   const { project, snapshot } = selected;
-  const file =
-    project.files.find((f) => f.id === project.ui?.activeFileId) ||
-    project.files[0];
-  if (!file || !validId(file.id)) throw new Error("旧版代码文件格式无效");
   return {
-    code: {
-      name: file.name,
-      content: await fs.readFile(
-        path.join(snapshot, "sources", `${file.id}.py`),
-        "utf8",
-      ),
-    },
     svg: project.svg
       ? {
           name: project.svg.name,
@@ -139,16 +155,37 @@ export function createStore(dataDir) {
   async function initialize() {
     await fs.mkdir(root, { recursive: true });
     try {
-      return await readJSON(metadataPath);
+      const old = await readJSON(metadataPath);
+      if (old.schemaVersion === 3) return old;
+      if (old.schemaVersion !== 2) throw new Error("不支持的内容版本");
+      // Keep an exact backup, including the removed code, before migrating.
+      try {
+        await fs.copyFile(
+          metadataPath,
+          path.join(root, "content-v2.backup.json"),
+          constants.COPYFILE_EXCL,
+        );
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+      }
+      const migrated = {
+        schemaVersion: 3,
+        revision: old.revision + 1,
+        svg: old.svg,
+        labels: [],
+        updatedAt: new Date().toISOString(),
+      };
+      await atomicJSON(metadataPath, migrated);
+      return migrated;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
     const legacy = await readLegacy(root);
     const document = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       revision: 1,
-      code: legacy?.code || { name: "model.py", content: "" },
       svg: await saveSvg(legacy?.svg),
+      labels: [],
       updatedAt: new Date().toISOString(),
     };
     await atomicJSON(metadataPath, document);
@@ -187,21 +224,30 @@ export function createStore(dataDir) {
           if (input?.revision !== old.revision)
             throw new HttpError(
               409,
-              "其他管理页已保存内容。请复制本页代码后刷新，再继续编辑。",
+              "其他页面已保存更新，本页修改暂未保存。请先保留标签文字，再刷新页面继续编辑。",
             );
-          const code = Object.hasOwn(input, "code")
-            ? validateFile(input.code, "code")
-            : old.code;
+          if (
+            Object.keys(input).some(
+              (key) => !["revision", "svg", "labels"].includes(key),
+            )
+          )
+            throw new HttpError(400, "仅支持保存 SVG 和标签");
+          // Validate before writing any SVG or metadata.
+          const suppliedLabels = Object.hasOwn(input, "labels")
+            ? validateLabels(input.labels)
+            : null;
           const svg = Object.hasOwn(input, "svg")
-            ? await saveSvg(
-                input.svg === null ? null : validateFile(input.svg, "svg"),
-              )
+            ? await saveSvg(input.svg === null ? null : validateFile(input.svg))
             : old.svg;
+          const labels =
+            suppliedLabels ?? (svg?.hash === old.svg?.hash ? old.labels : []);
+          if (!svg && labels.length)
+            throw new HttpError(400, "请先上传 SVG，再添加标签");
           const next = {
-            schemaVersion: 2,
+            schemaVersion: 3,
             revision: old.revision + 1,
-            code,
             svg,
+            labels,
             updatedAt: new Date().toISOString(),
           };
           await atomicJSON(metadataPath, next);

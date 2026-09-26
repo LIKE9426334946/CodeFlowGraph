@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { Content } from "../types";
 
-export function useContent(editable: boolean) {
+export function useContent() {
   const [content, setContent] = useState<Content | null>(null);
   const [status, setStatus] = useState<
     "saved" | "pending" | "saving" | "error"
@@ -14,12 +14,21 @@ export function useContent(editable: boolean) {
     saved = useRef(0),
     flight = useRef<Promise<void> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // A label editor can hold a draft before it is committed to content.
+  const editing = useRef(false);
   useEffect(() => {
     let live = true,
       fetching = false;
     const refresh = async () => {
-      if (fetching || !live) return;
+      if (
+        fetching ||
+        !live ||
+        editing.current ||
+        generation.current > saved.current
+      )
+        return;
       fetching = true;
+      const startedAt = generation.current;
       try {
         if (current.current) {
           const state = await api<{ revision: number }>("/state");
@@ -29,7 +38,12 @@ export function useContent(editable: boolean) {
           }
         }
         const p = await api<Content>("/content");
-        if (live) {
+        if (
+          live &&
+          !editing.current &&
+          generation.current === startedAt &&
+          generation.current === saved.current
+        ) {
           current.current = p;
           baseline.current = p;
           setContent(p);
@@ -43,42 +57,39 @@ export function useContent(editable: boolean) {
     };
     void refresh();
     const focus = () => {
-      if (!editable) void refresh();
+      void refresh();
     };
-    const interval = !editable
-      ? setInterval(() => {
-          if (document.visibilityState === "visible") void refresh();
-        }, 3000)
-      : undefined;
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 3000);
     window.addEventListener("focus", focus);
     return () => {
       live = false;
       clearInterval(interval);
       window.removeEventListener("focus", focus);
     };
-  }, [editable]);
+  }, []);
   const update = useCallback(
-    (patch: Partial<Pick<Content, "code" | "svg">>) => {
-      if (!editable || !current.current) return;
+    (patch: Partial<Pick<Content, "labels" | "svg">>) => {
+      if (!current.current) return;
       const p = { ...current.current, ...patch };
       current.current = p;
       generation.current++;
       setContent(p);
       setStatus("pending");
     },
-    [editable],
+    [],
   );
   const flush = useCallback(async () => {
     clearTimeout(timer.current);
-    if (!editable) return;
-    if (flight.current) await flight.current;
+    if (flight.current) return flight.current;
     if (!current.current || saved.current === generation.current) return;
     const work = async () => {
       while (current.current && saved.current < generation.current) {
         const snapshot = current.current,
           g = generation.current;
         const patch: Record<string, unknown> = { revision: snapshot.revision };
-        for (const key of ["code", "svg"] as const)
+        for (const key of ["labels", "svg"] as const)
           if (snapshot[key] !== baseline.current?.[key])
             patch[key] = snapshot[key];
         setStatus("saving");
@@ -105,17 +116,16 @@ export function useContent(editable: boolean) {
     } finally {
       flight.current = null;
     }
-  }, [editable]);
+  }, []);
   useEffect(() => {
     clearTimeout(timer.current);
-    if (editable && generation.current > saved.current)
+    if (generation.current > saved.current)
       timer.current = setTimeout(() => void flush().catch(() => {}), 750);
     return () => clearTimeout(timer.current);
-  }, [content, editable, flush]);
+  }, [content, flush]);
   useEffect(() => {
-    if (!editable) return;
     const leave = (event: BeforeUnloadEvent) => {
-      if (generation.current > saved.current) {
+      if (generation.current > saved.current || editing.current) {
         event.preventDefault();
         event.returnValue = "";
       }
@@ -140,6 +150,9 @@ export function useContent(editable: boolean) {
       window.removeEventListener("online", online);
       document.removeEventListener("visibilitychange", hide);
     };
-  }, [editable, flush]);
-  return { content, update, flush, status, error };
+  }, [flush]);
+  const setEditing = useCallback((value: boolean) => {
+    editing.current = value;
+  }, []);
+  return { content, update, flush, status, error, setEditing };
 }

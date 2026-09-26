@@ -1,6 +1,6 @@
 {
   "name": "codeflowgraph",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -14,12 +14,6 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@codemirror/commands": "^6.8.1",
-    "@codemirror/lang-python": "^6.2.1",
-    "@codemirror/language": "^6.11.3",
-    "@codemirror/state": "^6.5.2",
-    "@codemirror/view": "^6.38.1",
-    "@lezer/highlight": "^1.2.4",
     "dompurify": "^3.2.7",
     "express": "^5.1.0",
     "lucide-react": "^0.468.0",
