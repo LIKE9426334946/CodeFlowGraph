@@ -30,11 +30,13 @@ async function horizontalEdges(page: Page) {
     e.scrollLeft = 0;
   });
   const initial = (await page.locator("#display-svg").boundingBox())!;
-  expect(Math.abs(initial.x - box.x)).toBeLessThan(1);
+  const width = await viewport.evaluate((e) => e.clientWidth);
+  expect(
+    Math.abs(initial.x - box.x - Math.max(0, (width - initial.width) / 2)),
+  ).toBeLessThan(1);
   await viewport.evaluate((e) => {
     e.scrollLeft = e.scrollWidth;
   });
-  const width = await viewport.evaluate((e) => e.clientWidth);
   if (initial.width > width) {
     const drawing = (await page.locator("#display-svg").boundingBox())!;
     expect(Math.abs(drawing.x + drawing.width - box.x - width)).toBeLessThan(
@@ -318,7 +320,7 @@ test("tablet taps place labels; touch drag, pinch and scrolling keep original SV
   await context.close();
 });
 
-test("short SVG stays at the top without a blank vertical scroll range on smaller screens", async ({
+test("short SVG stays centered with aligned labels when the sidebar is hidden on smaller screens", async ({
   page,
 }) => {
   await seed(page);
@@ -333,7 +335,12 @@ test("short SVG stays at the top without a blank vertical scroll range on smalle
   });
   await page.goto("/admin");
   await expect(page.locator("#display-svg")).toBeVisible();
+  const label = await addLabel(page, "居中标签");
+  await page.locator("#display-svg").evaluate((e) => {
+    (window as any).drawingBefore = e;
+  });
   for (const size of [
+    { width: 1440, height: 960 },
     { width: 820, height: 1180 },
     { width: 390, height: 844 },
   ]) {
@@ -342,6 +349,40 @@ test("short SVG stays at the top without a blank vertical scroll range on smalle
     await horizontalEdges(page);
     await page.getByRole("button", { name: "缩小图片" }).click();
     await horizontalEdges(page);
+    await alignment(page, label);
+    const scale = await page
+      .locator("#display-svg")
+      .evaluate((e) => (e as SVGSVGElement).getScreenCTM()!.a);
+    await page.getByRole("button", { name: "隐藏侧边栏" }).click();
+    await expect(page.locator(".viewer-tools")).toBeHidden();
+    const toggle = page.getByRole("button", { name: "展开侧边栏" });
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const toggleBox = (await toggle.boundingBox())!;
+    expect(toggleBox.x).toBeLessThan(16);
+    expect(toggleBox.y).toBeLessThan(16);
+    expect(toggleBox.width).toBe(32);
+    await expect
+      .poll(
+        async () => (await page.locator(".svg-viewport").boundingBox())!.width,
+      )
+      .toBe(size.width);
+    await horizontalEdges(page);
+    await alignment(page, label);
+    expect(
+      await page
+        .locator("#display-svg")
+        .evaluate((e) => (e as SVGSVGElement).getScreenCTM()!.a),
+    ).toBeCloseTo(scale, 5);
+    await toggle.click();
+    await expect(page.locator(".viewer-tools")).toBeVisible();
+    await horizontalEdges(page);
+    await alignment(page, label);
+    expect(
+      await page
+        .locator("#display-svg")
+        .evaluate((e) => e === (window as any).drawingBefore),
+    ).toBe(true);
     const viewport = page.locator(".svg-viewport");
     const box = (await viewport.boundingBox())!;
     expect(
@@ -384,13 +425,11 @@ test("image library names, switches, persists drafts, blocks failed saves and de
     "A 图标签",
   );
   // Identical SVG bytes still represent independently named, annotated images.
-  await page
-    .locator('input[type="file"]')
-    .setInputFiles({
-      name: "UNetPlus.svg",
-      mimeType: "image/svg+xml",
-      buffer: Buffer.from(svg),
-    });
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "UNetPlus.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(svg),
+  });
   const bItem = page.getByRole("button", {
     name: "打开图片：UNetPlus",
     exact: true,
@@ -471,13 +510,11 @@ test("image library names, switches, persists drafts, blocks failed saves and de
   await expect(page.locator(".empty-svg")).toBeVisible();
   await page.reload();
   await expect(page.locator(".empty-svg")).toBeVisible();
-  await page
-    .locator('input[type="file"]')
-    .setInputFiles({
-      name: "重新添加.svg",
-      mimeType: "image/svg+xml",
-      buffer: Buffer.from(svg),
-    });
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "重新添加.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(svg),
+  });
   await expect(
     page.getByRole("button", { name: "打开图片：重新添加", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");

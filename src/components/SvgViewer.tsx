@@ -11,6 +11,8 @@ import {
   Maximize,
   Minimize,
   Minus,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Scan,
   Tag,
@@ -45,6 +47,8 @@ type Props = {
   actions: ReactNode;
   library: ReactNode;
   admin: boolean;
+  sidebarHidden: boolean;
+  onToggleSidebar: () => void;
   onUpload: () => void;
 };
 
@@ -59,6 +63,8 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     actions,
     library,
     admin,
+    sidebarHidden,
+    onToggleSidebar,
     onUpload,
   }: Props,
   ref,
@@ -225,26 +231,30 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     renderLabels();
     document.fonts.addEventListener("loadingdone", renderLabels);
     let scale = 1,
+      offsetX = 0,
       autoFit = true,
       frame = 0;
     let camera: Camera | null = null;
     const clampScale = (value: number) => Math.max(0.001, Math.min(8, value));
     const readCamera = (): Camera => ({
       scale,
-      centerX: bounds.x + (view.scrollLeft + view.clientWidth / 2) / scale,
+      centerX:
+        bounds.x + (view.scrollLeft + view.clientWidth / 2 - offsetX) / scale,
       centerY: bounds.y + (view.scrollTop + view.clientHeight / 2) / scale,
     });
     const position = (next: Camera) => {
       if (!view.clientWidth || !view.clientHeight) return;
       scale = clampScale(next.scale);
-      // Scrolling stops at all four drawing edges, without canvas padding.
+      // Center narrow drawings in the viewport. Larger drawings still scroll
+      // exactly to their edges; the labels share the same scene offset.
       host.style.width = `${bounds.width * scale}px`;
       host.style.height = `${bounds.height * scale}px`;
-      scene.style.left = "0";
+      offsetX = Math.max(0, (view.clientWidth - bounds.width * scale) / 2);
+      scene.style.left = `${offsetX}px`;
       scene.style.top = "0";
       scene.style.transform = `scale(${scale})`;
       view.scrollLeft =
-        (next.centerX - bounds.x) * scale - view.clientWidth / 2;
+        (next.centerX - bounds.x) * scale + offsetX - view.clientWidth / 2;
       view.scrollTop =
         (next.centerY - bounds.y) * scale - view.clientHeight / 2;
       if (percent.current)
@@ -580,14 +590,32 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     }
   };
   return (
-    <main className="svg-viewer">
-      <aside className="viewer-tools" aria-label="图片工具栏">
+    <main className={`svg-viewer ${sidebarHidden ? "sidebar-hidden" : ""}`}>
+      <button
+        className="sidebar-toggle"
+        aria-label={sidebarHidden ? "展开侧边栏" : "隐藏侧边栏"}
+        title={sidebarHidden ? "展开侧边栏" : "隐藏侧边栏"}
+        aria-expanded={!sidebarHidden}
+        aria-controls="viewer-sidebar"
+        onClick={onToggleSidebar}
+      >
+        {sidebarHidden ? (
+          <PanelLeftOpen size={17} />
+        ) : (
+          <PanelLeftClose size={17} />
+        )}
+      </button>
+      <aside
+        id="viewer-sidebar"
+        className="viewer-tools"
+        aria-label="图片工具栏"
+        hidden={sidebarHidden}
+      >
         <a
           className="brand"
           href={admin ? "/admin" : "/"}
           title="CodeFlowGraph"
         >
-          <Image size={21} />
           <strong>CodeFlowGraph</strong>
         </a>
         <span className="file-name" title={name || svg?.name}>

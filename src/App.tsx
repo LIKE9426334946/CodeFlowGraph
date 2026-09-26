@@ -24,7 +24,8 @@ export default function App() {
     remove,
   } = useContent(beforeChange);
   const [message, setMessage] = useState(""),
-    [uploading, setUploading] = useState(false);
+    [uploading, setUploading] = useState(false),
+    [sidebarHidden, setSidebarHidden] = useState(false);
   const svgInput = useRef<HTMLInputElement>(null);
   const uploadSvg = async (file?: File) => {
     if (!file) return;
@@ -119,6 +120,8 @@ export default function App() {
             onEditingChange={setEditing}
             actions={actions}
             admin={admin}
+            sidebarHidden={sidebarHidden}
+            onToggleSidebar={() => setSidebarHidden((hidden) => !hidden)}
             onUpload={() => svgInput.current?.click()}
             library={
               <ImageLibrary
