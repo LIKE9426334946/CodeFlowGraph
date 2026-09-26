@@ -116,7 +116,9 @@ export default function App() {
             svg={content?.svg || null}
             name={content?.name}
             labels={content?.labels || []}
-            onLabelsChange={update}
+            onLabelsChange={(labels) => {
+              if (admin) update(labels);
+            }}
             onEditingChange={setEditing}
             actions={actions}
             admin={admin}

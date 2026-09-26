@@ -145,8 +145,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       height: bounds.height,
       "aria-label": "图片标签",
     });
-    overlay.style.cssText =
-      "position:absolute;inset:0;display:block;overflow:visible";
+    overlay.style.cssText = `position:absolute;inset:0;display:block;overflow:visible;pointer-events:${admin ? "auto" : "none"}`;
     scene.append(picture, overlay);
     shadow.append(scene);
     const groups = new Map<string, SVGGElement>();
@@ -174,10 +173,12 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
         if (!group) {
           group = svgElement("g", {
             "data-label-id": label.id,
-            role: "button",
-            tabindex: 0,
+            role: admin ? "button" : "img",
           });
-          group.style.cssText = "cursor:move;outline:none";
+          if (admin) group.setAttribute("tabindex", "0");
+          group.style.cssText = admin
+            ? "cursor:move;outline:none"
+            : "pointer-events:none";
           overlay.append(group);
           groups.set(label.id, group);
         }
@@ -323,6 +324,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       null;
     let moveEvent: PointerEvent | null = null;
     const labelAt = (e: Event) => {
+      if (!admin) return;
       const element = e
         .composedPath()
         .find(
@@ -365,7 +367,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
           start: { x: e.clientX, y: e.clientY },
           moved: false,
         };
-        if (latest.current.placing && e.button === 0)
+        if (admin && latest.current.placing && e.button === 0)
           gesture = { ...base, kind: "place" };
         else if (label && e.button === 0)
           gesture = {
@@ -575,9 +577,9 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       view.classList.remove("dragging");
       latest.current.onEditingChange(false);
     };
-  }, [svg?.content]);
+  }, [svg?.content, admin]);
   const saveLabel = () => {
-    if (!editor?.label.text.trim()) return;
+    if (!admin || !editor?.label.text.trim()) return;
     const label = { ...editor.label, text: editor.label.text.trim() };
     if (editor.isNew) onLabelsChange([...labels, label]);
     else
@@ -590,6 +592,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
   };
   useImperativeHandle(ref, () => ({
     finishEditing() {
+      if (!admin) return;
       if (editor?.label.text.trim()) saveLabel();
       else setEditor(null);
       setPlacing(false);
@@ -637,21 +640,25 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
           {name || svg?.name || "SVG 图片"}
         </span>
         {library}
-        <button
-          className={`button add-label ${placing ? "active" : ""}`}
-          disabled={!svg || labels.length >= 1000}
-          aria-pressed={placing}
-          aria-label={placing ? "取消添加" : "添加标签"}
-          title={placing ? "取消添加" : "添加标签"}
-          onClick={() => {
-            setEditor(null);
-            setPlacing(!placing);
-          }}
-        >
-          <Tag size={17} />
-          <span>{placing ? "取消添加" : "添加标签"}</span>
-        </button>
-        <div className="tool-divider" />
+        {admin && (
+          <>
+            <button
+              className={`button add-label ${placing ? "active" : ""}`}
+              disabled={!svg || labels.length >= 1000}
+              aria-pressed={placing}
+              aria-label={placing ? "取消添加" : "添加标签"}
+              title={placing ? "取消添加" : "添加标签"}
+              onClick={() => {
+                setEditor(null);
+                setPlacing(!placing);
+              }}
+            >
+              <Tag size={17} />
+              <span>{placing ? "取消添加" : "添加标签"}</span>
+            </button>
+            <div className="tool-divider" />
+          </>
+        )}
         <div className="zoom-controls" aria-label="缩放控制">
           <button
             className="icon-button"
@@ -731,7 +738,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
             )}
           </div>
         )}
-        {placing && (
+        {admin && placing && (
           <div className="placement-hint" role="status">
             点击图片中的位置，输入标签文字
             <button
@@ -755,7 +762,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
             </button>
           </div>
         )}
-        {editor && (
+        {admin && editor && (
           <form
             className="label-editor"
             aria-label={editor.isNew ? "添加标签" : "编辑标签"}

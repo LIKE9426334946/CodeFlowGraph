@@ -123,7 +123,7 @@ async function addLabel(page: Page, text: string, touch = false) {
   return (await content(page)).labels.at(-1);
 }
 
-test("full-page SVG supports create/edit/drag/zoom/sync/delete labels without rebuilding the drawing", async ({
+test("admin supports create/edit/drag/zoom/sync/delete labels without rebuilding the drawing", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -140,7 +140,7 @@ test("full-page SVG supports create/edit/drag/zoom/sync/delete labels without re
     page.getByRole("button", { name: "打开图片：network", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await saved(page);
-  await page.goto("/");
+  await page.goto("/admin");
   await expect(page.locator("#display-svg")).toBeVisible();
   const sidebar = (await page
     .getByRole("complementary", { name: "图片工具栏" })
@@ -167,7 +167,7 @@ test("full-page SVG supports create/edit/drag/zoom/sync/delete labels without re
   await horizontalEdges(page);
   await verticalEdges(page);
   await page.getByRole("button", { name: "适应宽度" }).click();
-  await expect(page.locator("input[type=file], .cm-editor")).toHaveCount(0);
+  await expect(page.locator(".cm-editor")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /代码|分屏|上传/ }),
   ).toHaveCount(0);
@@ -267,7 +267,7 @@ test("tablet taps place labels; touch drag, pinch and scrolling keep original SV
     isMobile: true,
   });
   const page = await context.newPage();
-  await page.goto("http://127.0.0.1:3047/");
+  await page.goto("http://127.0.0.1:3047/admin");
   await seed(page);
   await page.reload();
   await expect(page.locator("#display-svg")).toBeVisible();
@@ -343,6 +343,29 @@ test("tablet taps place labels; touch drag, pinch and scrolling keep original SV
   await touch("touchEnd", []);
   await atMinimumHeight(page);
   await alignment(page, moved);
+  // The same labels are static when browsing on a touch device.
+  await page.goto("http://127.0.0.1:3047/");
+  const staticLabel = page.locator(`[data-label-id="${label.id}"]`);
+  await expect(staticLabel).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "添加标签", exact: true }),
+  ).toHaveCount(0);
+  const beforeBrowse = await content(page);
+  const staticBox = (await staticLabel.boundingBox())!;
+  await page.touchscreen.tap(staticBox.x + 12, staticBox.y + 14);
+  await expect(page.locator(".label-editor")).toHaveCount(0);
+  await touch("touchStart", [
+    { x: staticBox.x + 12, y: staticBox.y + 14, id: 0 },
+  ]);
+  await touch("touchMove", [
+    { x: staticBox.x + 12, y: staticBox.y - 86, id: 0 },
+  ]);
+  await touch("touchEnd", []);
+  await expect
+    .poll(() => page.locator(".svg-viewport").evaluate((e) => e.scrollTop))
+    .toBeGreaterThan(80);
+  await alignment(page, moved);
+  expect(await content(page)).toEqual(beforeBrowse);
   await context.close();
 });
 
@@ -434,8 +457,10 @@ test("zoom buttons and wheel stop when the network bottom reaches the viewport b
   page,
 }) => {
   await seed(page);
-  await page.goto("/");
+  await page.goto("/admin");
   const label = await addLabel(page, "最小缩放标签");
+  await page.goto("/");
+  await expect(page.locator("#display-svg")).toBeVisible();
   const smaller = page.getByRole("button", { name: "缩小图片" });
   for (let i = 0; i < 30 && (await smaller.isEnabled()); i++)
     await smaller.click();
@@ -466,6 +491,48 @@ test("zoom buttons and wheel stop when the network bottom reaches the viewport b
   await expect(smaller).toBeEnabled();
   await alignment(page, label);
   expect((await content(page)).labels[0]).toEqual(label);
+});
+
+test("display labels cannot be edited with mouse or keyboard and dragging them only pans the drawing", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.goto("/admin");
+  const label = await addLabel(page, "浏览标签");
+  const beforeBrowse = await content(page);
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/images/") && request.method() !== "GET")
+      writes.push(request.method());
+  });
+  await page.goto("/");
+  const annotation = page.locator(`[data-label-id="${label.id}"]`);
+  await expect(annotation).toBeVisible();
+  await expect(annotation).toHaveAttribute("role", "img");
+  await expect(page.locator("#label-overlay [tabindex]")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /添加标签|保存标签/ }),
+  ).toHaveCount(0);
+  await expect(page.locator('input[type="file"]')).toHaveCount(0);
+  const box = (await annotation.boundingBox())!;
+  await page.mouse.click(box.x + 12, box.y + 14);
+  await page.mouse.dblclick(box.x + 12, box.y + 14);
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Delete");
+  await expect(page.locator(".label-editor, .placement-hint")).toHaveCount(0);
+  await page.mouse.move(box.x + 12, box.y + 14);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 48, box.y - 86, { steps: 6 });
+  await page.mouse.up();
+  await expect
+    .poll(() => page.locator(".svg-viewport").evaluate((e) => e.scrollTop))
+    .toBeGreaterThan(80);
+  await alignment(page, label);
+  await page.keyboard.press("Control+s");
+  await saved(page);
+  await expect(page.locator(".label-editor")).toHaveCount(0);
+  expect(await content(page)).toEqual(beforeBrowse);
+  expect(writes).toEqual([]);
 });
 
 test("image library names, switches, persists drafts, blocks failed saves and deletes independently", async ({
