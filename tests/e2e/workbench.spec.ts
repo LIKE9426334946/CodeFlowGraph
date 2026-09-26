@@ -1,4 +1,144 @@
 import { test, expect, type Page } from "@playwright/test";
+
+test.describe("fixed zoom", () => {
+  test.use({ hasTouch: true, viewport: { width: 1180, height: 820 } });
+  for (const route of ["/", "/admin"]) {
+    test(`${route} locks every zoom input while preserving pan and unlocks correctly`, async ({
+      page,
+    }) => {
+      const image = await seed(page);
+      const label = {
+        id: "locked_label",
+        text: "固定缩放标签",
+        x: 60,
+        y: 610,
+        fontSize: 18,
+      };
+      const response = await page.request.patch(`/api/images/${image.id}`, {
+        data: { revision: image.revision, labels: [label] },
+      });
+      expect(response.ok()).toBeTruthy();
+      await page.goto(route);
+      const drawing = page.locator("#display-svg"),
+        viewport = page.locator(".svg-viewport");
+      await expect(drawing).toBeVisible();
+      await drawing.evaluate((e) => {
+        (window as any).drawingBefore = e;
+      });
+      const scale = () =>
+        drawing.evaluate((e) => (e as SVGSVGElement).getScreenCTM()!.a);
+      const settle = () =>
+        page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => resolve()),
+              ),
+            ),
+        );
+      const lockedScale = await scale();
+      const unchanged = async () => {
+        await settle();
+        expect(await scale()).toBeCloseTo(lockedScale, 6);
+        await alignment(page, label);
+      };
+      await page.getByRole("button", { name: "固定缩放", exact: true }).click();
+      const unlock = page.getByRole("button", {
+        name: "解除固定缩放",
+        exact: true,
+      });
+      await expect(unlock).toHaveAttribute("aria-pressed", "true");
+      for (const name of ["缩小图片", "放大图片", "恢复 100%", "适应宽度"])
+        await expect(
+          page.getByRole("button", { name, exact: true }),
+        ).toBeDisabled();
+      await page.mouse.move(900, 550);
+      for (const key of ["Control", "Meta"]) {
+        await page.keyboard.down(key);
+        await page.mouse.wheel(0, -200);
+        await page.keyboard.up(key);
+        await unchanged();
+      }
+      await page.mouse.move(950, 600);
+      await page.mouse.down();
+      await page.mouse.move(850, 440, { steps: 6 });
+      await page.mouse.up();
+      await expect
+        .poll(() => viewport.evaluate((e) => e.scrollTop))
+        .toBeGreaterThan(140);
+      const beforeWheel = await viewport.evaluate((e) => e.scrollTop);
+      await page.mouse.wheel(0, 240);
+      await expect
+        .poll(() => viewport.evaluate((e) => e.scrollTop))
+        .toBeGreaterThan(beforeWheel + 180);
+      await unchanged();
+      await page.getByRole("button", { name: "隐藏侧边栏" }).click();
+      await unchanged();
+      await page.getByRole("button", { name: "展开侧边栏" }).click();
+      await page.setViewportSize({ width: 820, height: 1180 });
+      await unchanged();
+      await viewport.evaluate((e) => {
+        e.scrollTop = 500;
+      });
+      const cdp = await page.context().newCDPSession(page);
+      const touch = (type: string, touchPoints: any[]) =>
+        cdp.send("Input.dispatchTouchEvent", { type, touchPoints });
+      const pinchAndPan = async () => {
+        await touch("touchStart", [
+          { x: 400, y: 700, id: 0 },
+          { x: 650, y: 700, id: 1 },
+        ]);
+        await touch("touchMove", [
+          { x: 340, y: 580, id: 0 },
+          { x: 750, y: 580, id: 1 },
+        ]);
+        await touch("touchEnd", []);
+      };
+      await pinchAndPan();
+      await unchanged();
+      await expect
+        .poll(() => viewport.evaluate((e) => e.scrollTop))
+        .toBeGreaterThan(600);
+      const beforeTouchPan = await viewport.evaluate((e) => e.scrollTop);
+      await touch("touchStart", [{ x: 550, y: 800, id: 0 }]);
+      await touch("touchMove", [{ x: 510, y: 670, id: 0 }]);
+      await touch("touchEnd", []);
+      await expect
+        .poll(() => viewport.evaluate((e) => e.scrollTop))
+        .toBeGreaterThan(beforeTouchPan + 100);
+      await unchanged();
+      await unlock.click();
+      await expect(
+        page.getByRole("button", { name: "放大图片" }),
+      ).toBeEnabled();
+      await page.mouse.move(600, 500);
+      await page.keyboard.down("Control");
+      await page.mouse.wheel(0, -200);
+      await page.keyboard.up("Control");
+      await expect.poll(scale).toBeGreaterThan(lockedScale * 1.3);
+      const beforePinch = await scale();
+      await pinchAndPan();
+      await expect.poll(scale).toBeGreaterThan(beforePinch * 1.3);
+      await page.getByRole("button", { name: "适应宽度" }).click();
+      const smaller = page.getByRole("button", { name: "缩小图片" });
+      for (let i = 0; i < 30 && (await smaller.isEnabled()); i++)
+        await smaller.click();
+      await atMinimumHeight(page);
+      const minimum = await scale();
+      await page.getByRole("button", { name: "固定缩放", exact: true }).click();
+      await page.setViewportSize({ width: 820, height: 1400 });
+      await settle();
+      expect(await scale()).toBeCloseTo(minimum, 6);
+      await unlock.click();
+      await atMinimumHeight(page);
+      expect(
+        await drawing.evaluate((e) => e === (window as any).drawingBefore),
+      ).toBe(true);
+      expect((await content(page)).labels).toEqual([label]);
+    });
+  }
+});
+
 const svg =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 500 600 2400"><style>text{fill:#506080;font-size:24px}rect{stroke:#aaa}</style><rect x="-100" y="500" width="600" height="2400" fill="white"/><g transform="translate(30 650)"><rect width="300" height="140" rx="6" fill="#e8e3fb"/><text x="22" y="80">Attention</text></g><text x="50" y="2820">Output</text></svg>';
 async function seed(page: Page) {

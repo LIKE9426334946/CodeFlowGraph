@@ -216,6 +216,11 @@ svg {
   border: 0;
   background: transparent;
 }
+.zoom-lock.active {
+  color: var(--accent);
+  border-color: #d8cff6;
+  background: #f0ecfb;
+}
 .toolbar-actions {
   display: flex;
   flex-direction: column;
@@ -602,7 +607,8 @@ svg {
   .zoom-controls .icon-button {
     width: 40px;
   }
-  .viewer-tools .library-add > span {
+  .viewer-tools .library-add > span,
+  .viewer-tools .zoom-lock > span {
     display: inline;
   }
   .library-add {

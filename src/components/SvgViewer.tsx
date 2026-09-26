@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   Image,
+  Lock,
   Maximize,
   Minimize,
   Minus,
@@ -17,6 +18,7 @@ import {
   Scan,
   Tag,
   Trash2,
+  Unlock,
   X,
 } from "lucide-react";
 import type { Camera, SvgLabel, TextFile } from "../types";
@@ -26,6 +28,7 @@ type Controls = {
   zoom: (factor: number) => void;
   actual: () => void;
   fit: () => void;
+  setLocked: (locked: boolean) => void;
 };
 type Editor = { label: SvgLabel; isNew: boolean };
 type Point = { x: number; y: number };
@@ -78,7 +81,8 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
   const [error, setError] = useState(""),
     [placing, setPlacing] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null),
-    [fullscreen, setFullscreen] = useState(false);
+    [fullscreen, setFullscreen] = useState(false),
+    [zoomLocked, setZoomLocked] = useState(false);
   const latest = useRef({
     labels,
     onLabelsChange,
@@ -111,6 +115,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       host = surface.current;
     setEditor(null);
     setPlacing(false);
+    setZoomLocked(false);
     setError("");
     if (!svg || !view || !host) return;
     let parsed;
@@ -235,6 +240,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     let scale = 1,
       offsetX = 0,
       autoFit = true,
+      locked = false,
       frame = 0;
     let camera: Camera | null = null;
     // Stop at the scale that fits the whole drawing: height for tall networks,
@@ -254,7 +260,8 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     });
     const position = (next: Camera) => {
       if (!view.clientWidth || !view.clientHeight) return;
-      scale = clampScale(next.scale);
+      // While locked even a viewport resize must retain the exact scale.
+      if (!locked) scale = clampScale(next.scale);
       // Center narrow drawings in the viewport. Larger drawings still scroll
       // exactly to their edges; the labels share the same scene offset.
       host.style.width = `${bounds.width * scale}px`;
@@ -270,14 +277,18 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       if (percent.current)
         percent.current.textContent = `${(scale * 100).toFixed(scale < 0.1 ? 1 : 0)}%`;
       if (zoomOut.current) {
-        zoomOut.current.disabled = scale <= minimumScale() * (1 + 1e-6);
-        zoomOut.current.title = zoomOut.current.disabled
-          ? "已缩小到完整显示"
-          : "缩小图片";
+        zoomOut.current.disabled =
+          locked || scale <= minimumScale() * (1 + 1e-6);
+        zoomOut.current.title = locked
+          ? "缩放已固定"
+          : zoomOut.current.disabled
+            ? "已缩小到完整显示"
+            : "缩小图片";
       }
       camera = readCamera();
     };
     const fit = () => {
+      if (locked) return;
       autoFit = true;
       const k = clampScale(view.clientWidth / bounds.width);
       position({
@@ -287,6 +298,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       });
     };
     const zoomAt = (next: number, x: number, y: number) => {
+      if (locked) return;
       autoFit = false;
       const p = clientToSvg(overlay, x, y),
         box = view.getBoundingClientRect(),
@@ -299,11 +311,19 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     };
     controls.current = {
       fit,
+      setLocked: (value) => {
+        locked = value;
+        autoFit = false;
+        setZoomLocked(value);
+        position(readCamera());
+      },
       actual: () => {
+        if (locked) return;
         autoFit = false;
         position({ ...readCamera(), scale: 1 });
       },
       zoom: (factor) => {
+        if (locked) return;
         autoFit = false;
         position({ ...readCamera(), scale: scale * factor });
       },
@@ -402,7 +422,10 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
         autoFit = false;
         const p = midpoint(),
           box = view.getBoundingClientRect(),
-          k = clampScale((pinch.scale * p.distance) / pinch.distance);
+          // Locked two-finger gestures can still pan with their midpoint.
+          k = locked
+            ? scale
+            : clampScale((pinch.scale * p.distance) / pinch.distance);
         position({
           scale: k,
           centerX: pinch.anchor.x - (p.x - box.left - view.clientWidth / 2) / k,
@@ -672,7 +695,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
           </button>
           <button
             className="zoom-label"
-            disabled={!svg}
+            disabled={!svg || zoomLocked}
             ref={percent}
             title="恢复 100%"
             aria-label="恢复 100%"
@@ -682,7 +705,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
           </button>
           <button
             className="icon-button"
-            disabled={!svg}
+            disabled={!svg || zoomLocked}
             aria-label="放大图片"
             title="放大图片"
             onClick={() => controls.current?.zoom(1.2)}
@@ -691,8 +714,19 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
           </button>
         </div>
         <button
-          className="button fit-button"
+          className={`button zoom-lock ${zoomLocked ? "active" : ""}`}
           disabled={!svg}
+          aria-label={zoomLocked ? "解除固定缩放" : "固定缩放"}
+          title={zoomLocked ? "解除固定缩放" : "固定当前缩放比例"}
+          aria-pressed={zoomLocked}
+          onClick={() => controls.current?.setLocked(!zoomLocked)}
+        >
+          {zoomLocked ? <Lock size={17} /> : <Unlock size={17} />}
+          <span>{zoomLocked ? "解除固定缩放" : "固定缩放"}</span>
+        </button>
+        <button
+          className="button fit-button"
+          disabled={!svg || zoomLocked}
           aria-label="适应宽度"
           title="适应宽度"
           onClick={() => controls.current?.fit()}
