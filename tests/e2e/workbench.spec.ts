@@ -84,6 +84,20 @@ async function point(page: Page, x: number, y: number) {
     { x, y },
   );
 }
+async function atMinimumHeight(page: Page) {
+  await expect(page.getByRole("button", { name: "缩小图片" })).toBeDisabled();
+  await expect
+    .poll(async () => {
+      const drawing = (await page.locator("#display-svg").boundingBox())!;
+      const height = await page
+        .locator(".svg-viewport")
+        .evaluate((e) => e.clientHeight);
+      return Math.abs(drawing.height - height);
+    })
+    .toBeLessThan(1);
+  await horizontalEdges(page);
+  await verticalEdges(page);
+}
 async function alignment(
   page: Page,
   label: { id: string; x: number; y: number },
@@ -317,6 +331,18 @@ test("tablet taps place labels; touch drag, pinch and scrolling keep original SV
     "平板标签",
   );
   expect((await content(page)).labels[0]).toEqual(moved);
+  // Pinching inward cannot shrink a long network below the viewport height.
+  await touch("touchStart", [
+    { x: 400, y: 500, id: 0 },
+    { x: 700, y: 500, id: 1 },
+  ]);
+  await touch("touchMove", [
+    { x: 545, y: 500, id: 0 },
+    { x: 555, y: 500, id: 1 },
+  ]);
+  await touch("touchEnd", []);
+  await atMinimumHeight(page);
+  await alignment(page, moved);
   await context.close();
 });
 
@@ -347,12 +373,9 @@ test("short SVG stays centered with aligned labels when the sidebar is hidden on
     await page.setViewportSize(size);
     await page.getByRole("button", { name: "适应宽度" }).click();
     await horizontalEdges(page);
-    await page.getByRole("button", { name: "缩小图片" }).click();
-    await horizontalEdges(page);
+    // A wide image stops at its full width, keeping the entire image visible.
+    await expect(page.getByRole("button", { name: "缩小图片" })).toBeDisabled();
     await alignment(page, label);
-    const scale = await page
-      .locator("#display-svg")
-      .evaluate((e) => (e as SVGSVGElement).getScreenCTM()!.a);
     await page.getByRole("button", { name: "隐藏侧边栏" }).click();
     await expect(page.locator(".viewer-tools")).toBeHidden();
     const toggle = page.getByRole("button", { name: "展开侧边栏" });
@@ -369,11 +392,11 @@ test("short SVG stays centered with aligned labels when the sidebar is hidden on
       .toBe(size.width);
     await horizontalEdges(page);
     await alignment(page, label);
-    expect(
-      await page
-        .locator("#display-svg")
-        .evaluate((e) => (e as SVGSVGElement).getScreenCTM()!.a),
-    ).toBeCloseTo(scale, 5);
+    await expect
+      .poll(
+        async () => (await page.locator("#display-svg").boundingBox())!.width,
+      )
+      .toBeCloseTo(size.width, 1);
     await toggle.click();
     await expect(page.locator(".viewer-tools")).toBeVisible();
     await horizontalEdges(page);
@@ -405,6 +428,44 @@ test("short SVG stays centered with aligned labels when the sidebar is hidden on
       ),
     ).toBe(true);
   }
+});
+
+test("zoom buttons and wheel stop when the network bottom reaches the viewport bottom", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.goto("/");
+  const label = await addLabel(page, "最小缩放标签");
+  const smaller = page.getByRole("button", { name: "缩小图片" });
+  for (let i = 0; i < 30 && (await smaller.isEnabled()); i++)
+    await smaller.click();
+  await atMinimumHeight(page);
+  await alignment(page, label);
+  const scale = await page
+    .locator("#display-svg")
+    .evaluate((e) => (e as SVGSVGElement).getScreenCTM()!.a);
+  await page.mouse.move(850, 550);
+  await page.keyboard.down("Control");
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, 200);
+  await page.keyboard.up("Control");
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  await atMinimumHeight(page);
+  expect(
+    await page
+      .locator("#display-svg")
+      .evaluate((e) => (e as SVGSVGElement).getScreenCTM()!.a),
+  ).toBeCloseTo(scale, 5);
+  await page.getByRole("button", { name: "隐藏侧边栏" }).click();
+  await horizontalEdges(page);
+  await alignment(page, label);
+  await page.getByRole("button", { name: "展开侧边栏" }).click();
+  await page.setViewportSize({ width: 1440, height: 1180 });
+  await atMinimumHeight(page);
+  await alignment(page, label);
+  await page.getByRole("button", { name: "放大图片" }).click();
+  await expect(smaller).toBeEnabled();
+  await alignment(page, label);
+  expect((await content(page)).labels[0]).toEqual(label);
 });
 
 test("image library names, switches, persists drafts, blocks failed saves and deletes independently", async ({

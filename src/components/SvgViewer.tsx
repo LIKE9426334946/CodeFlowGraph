@@ -72,6 +72,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
   const viewport = useRef<HTMLDivElement>(null),
     surface = useRef<HTMLDivElement>(null);
   const percent = useRef<HTMLButtonElement>(null),
+    zoomOut = useRef<HTMLButtonElement>(null),
     controls = useRef<Controls | null>(null);
   const redraw = useRef<(() => void) | null>(null);
   const [error, setError] = useState(""),
@@ -235,7 +236,15 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       autoFit = true,
       frame = 0;
     let camera: Camera | null = null;
-    const clampScale = (value: number) => Math.max(0.001, Math.min(8, value));
+    // Stop at the scale that fits the whole drawing: height for tall networks,
+    // width for wide drawings. Recompute after resizing or toggling the sidebar.
+    const minimumScale = () =>
+      Math.min(
+        view.clientWidth / bounds.width,
+        view.clientHeight / bounds.height,
+      );
+    const clampScale = (value: number) =>
+      Math.max(minimumScale(), Math.min(8, value));
     const readCamera = (): Camera => ({
       scale,
       centerX:
@@ -259,6 +268,12 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
         (next.centerY - bounds.y) * scale - view.clientHeight / 2;
       if (percent.current)
         percent.current.textContent = `${(scale * 100).toFixed(scale < 0.1 ? 1 : 0)}%`;
+      if (zoomOut.current) {
+        zoomOut.current.disabled = scale <= minimumScale() * (1 + 1e-6);
+        zoomOut.current.title = zoomOut.current.disabled
+          ? "已缩小到完整显示"
+          : "缩小图片";
+      }
       camera = readCamera();
     };
     const fit = () => {
@@ -640,6 +655,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
         <div className="zoom-controls" aria-label="缩放控制">
           <button
             className="icon-button"
+            ref={zoomOut}
             disabled={!svg}
             aria-label="缩小图片"
             title="缩小图片"
