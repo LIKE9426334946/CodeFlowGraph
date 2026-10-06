@@ -52,6 +52,7 @@ type Props = {
   actions: ReactNode;
   library: ReactNode;
   admin: boolean;
+  hasFolder: boolean;
   sidebarHidden: boolean;
   onToggleSidebar: () => void;
   onUpload: () => void;
@@ -70,6 +71,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     actions,
     library,
     admin,
+    hasFolder,
     sidebarHidden,
     onToggleSidebar,
     onUpload,
@@ -808,9 +810,13 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
         ) : (
           <div className="empty-svg">
             <Image size={46} strokeWidth={1.2} />
-            <p>上传一张 SVG，开始标注</p>
+            <p>{hasFolder ? "此目录暂无图片" : "请先新增或选择目录"}</p>
             {admin ? (
-              <button className="button" onClick={onUpload}>
+              <button
+                className="button"
+                disabled={!hasFolder}
+                onClick={onUpload}
+              >
                 上传 SVG
               </button>
             ) : (

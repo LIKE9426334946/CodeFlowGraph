@@ -584,6 +584,78 @@ svg {
   border: 1px solid #bfb5ea;
   border-radius: 5px;
 }
+.image-name-form textarea,
+.image-name-form select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #bfb5ea;
+  border-radius: 5px;
+  color: inherit;
+  background: white;
+  font: inherit;
+}
+.image-name-form textarea {
+  resize: vertical;
+  min-height: 76px;
+}
+.image-name-form select {
+  min-height: 40px;
+}
+.folder-list {
+  max-height: min(38dvh, 330px);
+  overflow-y: auto;
+  min-height: 44px;
+}
+.folder-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 4px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 12px;
+}
+.folder-item > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.folder-item > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.folder-item.selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+.folder-content {
+  margin: 0 0 6px 8px;
+  padding-left: 5px;
+  border-left: 1px solid var(--line);
+}
+.folder-description {
+  margin: 2px 5px 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.folder-content .image-list {
+  max-height: none;
+  overflow: visible;
+}
+.folder-manage-actions .button {
+  padding: 0 4px;
+  gap: 3px;
+  font-size: 11px;
+}
+.move-image {
+  font-size: 12px;
+}
 .image-name-form > div {
   display: flex;
   gap: 4px;

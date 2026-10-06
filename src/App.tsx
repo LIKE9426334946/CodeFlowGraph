@@ -12,6 +12,7 @@ export default function App() {
   const {
     content,
     gallery,
+    folderId,
     update,
     flush,
     status,
@@ -23,6 +24,11 @@ export default function App() {
     rename,
     remove,
     setLocked,
+    openFolder,
+    createFolder,
+    editFolder,
+    deleteFolder,
+    move,
   } = useContent(beforeChange);
   const [message, setMessage] = useState(""),
     [uploading, setUploading] = useState(false),
@@ -32,11 +38,12 @@ export default function App() {
     if (!file) return;
     setUploading(true);
     try {
+      if (!folderId) throw new Error("请先新增或选择目录，再添加 SVG 图片");
       if (!file.name.toLowerCase().endsWith(".svg") || file.size > 30_000_000)
         throw new Error("请选择不超过 30 MB 的 SVG 文件");
       const text = await file.text();
       parseSvg(text);
-      await add({ name: file.name, content: text });
+      await add({ name: file.name, content: text }, folderId);
       setMessage("");
     } catch (e) {
       setMessage((e as Error).message);
@@ -125,18 +132,25 @@ export default function App() {
             onEditingChange={setEditing}
             actions={actions}
             admin={admin}
+            hasFolder={!!folderId}
             sidebarHidden={sidebarHidden}
             onToggleSidebar={() => setSidebarHidden((hidden) => !hidden)}
             onUpload={() => svgInput.current?.click()}
             library={
               <ImageLibrary
                 gallery={gallery}
+                folderId={folderId}
                 current={content}
                 admin={admin}
                 onOpen={open}
                 onAdd={() => svgInput.current?.click()}
                 onRename={rename}
                 onDelete={remove}
+                onOpenFolder={openFolder}
+                onCreateFolder={createFolder}
+                onEditFolder={editFolder}
+                onDeleteFolder={deleteFolder}
+                onMove={move}
               />
             }
           />

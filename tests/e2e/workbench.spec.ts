@@ -143,14 +143,19 @@ const svg =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 500 600 2400"><style>text{fill:#506080;font-size:24px}rect{stroke:#aaa}</style><rect x="-100" y="500" width="600" height="2400" fill="white"/><g transform="translate(30 650)"><rect width="300" height="140" rx="6" fill="#e8e3fb"/><text x="22" y="80">Attention</text></g><text x="50" y="2820">Output</text></svg>';
 async function seed(page: Page) {
   const gallery = await (await page.request.get("/api/gallery")).json();
-  for (const image of gallery.images) {
-    const removed = await page.request.delete(`/api/images/${image.id}`, {
-      data: { revision: image.revision },
+  for (const folder of gallery.folders) {
+    const removed = await page.request.delete(`/api/folders/${folder.id}`, {
+      data: { revision: folder.revision },
     });
     expect(removed.ok()).toBeTruthy();
   }
+  const folder = await page.request.post("/api/folders", {
+    data: { name: "测试目录" },
+  });
+  expect(folder.ok()).toBeTruthy();
+  const folderId = (await folder.json()).gallery.activeFolderId;
   const response = await page.request.post("/api/images", {
-    data: { svg: { name: "model.svg", content: svg } },
+    data: { folderId, svg: { name: "model.svg", content: svg } },
   });
   expect(response.ok()).toBeTruthy();
   return (await response.json()).image;
@@ -270,7 +275,11 @@ test.describe("image locking", () => {
   }) => {
     const first = await seed(page);
     await page.request.post("/api/images", {
-      data: { name: "另一张图", svg: { name: "other.svg", content: svg } },
+      data: {
+        folderId: first.folderId,
+        name: "另一张图",
+        svg: { name: "other.svg", content: svg },
+      },
     });
     await page.goto("/admin");
     await page
@@ -719,9 +728,10 @@ test("tablet taps place labels; touch drag, pinch and scrolling keep original SV
 test("short SVG stays centered with aligned labels when the sidebar is hidden on smaller screens", async ({
   page,
 }) => {
-  await seed(page);
+  const image = await seed(page);
   await page.request.post("/api/images", {
     data: {
+      folderId: image.folderId,
       svg: {
         name: "short.svg",
         content:
@@ -994,5 +1004,153 @@ test("image library names, switches, persists drafts, blocks failed saves and de
     page.getByRole("button", { name: "打开图片：重新添加", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("[data-label-id]")).toHaveCount(0);
+  await display.close();
+});
+
+test("folder management persists descriptions, scopes uploads, moves locked images and confirms deletion", async ({
+  page,
+}) => {
+  const image = await seed(page);
+  await page.goto("/admin");
+  const label = await addLabel(page, "需要保留的标签");
+  await page.locator(`[data-label-id="${label.id}"]`).click();
+  await page
+    .getByRole("textbox", { name: "标签文字" })
+    .fill("创建目录前的草稿");
+  await page.getByRole("button", { name: "新增目录", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "目录名称", exact: true })
+    .fill("分割模型");
+  await page
+    .getByRole("textbox", { name: "简短说明（选填）", exact: true })
+    .fill("U-Net 与相关改进结构");
+  await page.getByRole("button", { name: "保存目录", exact: true }).click();
+  const folderItem = page.getByRole("button", {
+    name: "打开目录：分割模型",
+    exact: true,
+  });
+  await expect(folderItem).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".folder-description")).toHaveText(
+    "U-Net 与相关改进结构",
+  );
+  await expect(page.locator(".empty-svg")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "打开图片：model", exact: true }),
+  ).toHaveCount(0);
+  expect((await content(page, image.id)).labels[0].text).toBe(
+    "创建目录前的草稿",
+  );
+  await page.reload();
+  await expect(folderItem).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".empty-svg")).toBeVisible();
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles({
+      name: "unet.svg",
+      mimeType: "image/svg+xml",
+      buffer: Buffer.from(svg),
+    });
+  const uploaded = page.getByRole("button", {
+    name: "打开图片：unet",
+    exact: true,
+  });
+  await expect(uploaded).toHaveAttribute("aria-pressed", "true");
+  const created = await content(page);
+  expect(created.folderId).not.toBe(image.folderId);
+  await page.getByRole("button", { name: "编辑目录", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "目录名称", exact: true })
+    .fill("语义分割");
+  await page
+    .getByRole("textbox", { name: "简短说明（选填）", exact: true })
+    .fill("医学图像与水体分割");
+  await page.getByRole("button", { name: "保存目录", exact: true }).click();
+  const renamed = page.getByRole("button", {
+    name: "打开目录：语义分割",
+    exact: true,
+  });
+  await expect(renamed).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".folder-description")).toHaveText(
+    "医学图像与水体分割",
+  );
+  await page
+    .getByRole("button", { name: "打开目录：测试目录", exact: true })
+    .click();
+  await expect(uploaded).toHaveCount(0);
+  await page.getByRole("button", { name: "锁定图片", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "解锁图片", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "移动图片", exact: true }).click();
+  await page
+    .getByLabel("目标目录", { exact: true })
+    .selectOption(created.folderId);
+  await page.getByRole("button", { name: "确认移动", exact: true }).click();
+  await expect(renamed).toHaveAttribute("aria-expanded", "true");
+  await expect(
+    page.getByRole("button", { name: "解锁图片", exact: true }),
+  ).toBeVisible();
+  expect((await content(page, image.id)).folderId).toBe(created.folderId);
+  expect((await content(page, image.id)).labels[0].text).toBe(
+    "创建目录前的草稿",
+  );
+  await expect(page.locator(`[data-label-id="${label.id}"]`)).toContainText(
+    "创建目录前的草稿",
+  );
+  const display = await page.context().newPage();
+  await display.goto("/");
+  await expect(
+    display.getByRole("button", { name: "打开目录：语义分割" }),
+  ).toHaveAttribute("aria-expanded", "true");
+  await expect(display.locator(".folder-description")).toHaveText(
+    "医学图像与水体分割",
+  );
+  await expect(
+    display.getByRole("button", {
+      name: /新增目录|编辑目录|删除目录|添加 SVG|移动图片/,
+    }),
+  ).toHaveCount(0);
+  await display.getByRole("button", { name: "打开目录：测试目录" }).click();
+  await expect(display.locator(".empty-svg")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(renamed).toHaveAttribute("aria-expanded", "true");
+  // Other pages retain their own folder selection.
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain("2 张图片");
+    void dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "删除目录", exact: true }).click();
+  await expect(renamed).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除目录", exact: true }).click();
+  await expect(renamed).toHaveCount(0);
+  await expect(page.locator(".empty-svg")).toBeVisible();
+  expect((await page.request.get(`/api/images/${image.id}`)).status()).toBe(
+    404,
+  );
+  expect((await page.request.get(`/api/images/${created.id}`)).status()).toBe(
+    404,
+  );
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除目录", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "添加 SVG", exact: true }),
+  ).toBeDisabled();
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "添加 SVG", exact: true }),
+  ).toBeDisabled();
+  const denied = await page.request.post("/api/images", {
+    data: { svg: { name: "orphan.svg", content: svg } },
+  });
+  expect(denied.status()).toBe(400);
+  await page.getByRole("button", { name: "新增目录", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "目录名称", exact: true })
+    .fill("重新开始");
+  await page.getByRole("button", { name: "保存目录", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "添加 SVG", exact: true }),
+  ).toBeEnabled();
   await display.close();
 });

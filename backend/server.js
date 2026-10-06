@@ -33,6 +33,18 @@ export function createApp(
     res.json({ ok: true, name: "CodeFlowGraph" }),
   );
   app.get("/api/gallery", async (_req, res) => res.json(await store.list()));
+  app.post("/api/folders", async (req, res) =>
+    res.status(201).json(await store.createFolder(req.body)),
+  );
+  app.patch("/api/folders/:id", async (req, res) =>
+    res.json(await store.saveFolder(req.params.id, req.body)),
+  );
+  app.delete("/api/folders/:id", async (req, res) =>
+    res.json(await store.removeFolder(req.params.id, req.body)),
+  );
+  app.post("/api/folders/:id/open", async (req, res) =>
+    res.json(await store.openFolder(req.params.id)),
+  );
   app.post("/api/images", async (req, res) =>
     res.status(201).json(await store.create(req.body)),
   );

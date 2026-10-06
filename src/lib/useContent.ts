@@ -6,13 +6,16 @@ import type {
   ImageSummary,
   SvgLabel,
   TextFile,
+  FolderInput,
 } from "../types";
 
-type OpenResult = { gallery: Gallery; image: Content };
+type OpenResult = { gallery: Gallery; image: Content | null };
 type SaveResult = { gallery: Gallery; image: ImageSummary };
 export function useContent(beforeChange: () => void) {
   const [content, setContent] = useState<Content | null>(null);
   const [gallery, setGallery] = useState<Gallery | null>(null);
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const selectedFolder = useRef<string | null>(null);
   const [status, setStatus] = useState<
     "saved" | "pending" | "saving" | "error"
   >("saved");
@@ -32,8 +35,14 @@ export function useContent(beforeChange: () => void) {
     setGallery(value);
   }, []);
   const install = useCallback(
-    (next: Gallery, image: Content | null) => {
+    (
+      next: Gallery,
+      image: Content | null,
+      selectedId = image?.folderId ?? next.activeFolderId,
+    ) => {
       current.current = image;
+      selectedFolder.current = selectedId;
+      setFolderId(selectedId);
       generation.current = saved.current = 0;
       editing.current = false;
       setContent(image);
@@ -61,10 +70,24 @@ export function useContent(beforeChange: () => void) {
         const next = await api<Gallery>("/gallery");
         if (next.revision === catalog.current?.revision) return;
         const old = current.current;
+        const selectedId = next.folders.some(
+          (folder) => folder.id === selectedFolder.current,
+        )
+          ? selectedFolder.current
+          : next.activeFolderId;
         const id =
-          old && next.images.some((item) => item.id === old.id)
+          old &&
+          next.images.some(
+            (item) => item.id === old.id && item.folderId === selectedId,
+          )
             ? old.id
-            : next.activeImageId;
+            : next.images.find(
+                (item) =>
+                  item.id === next.activeImageId &&
+                  item.folderId === selectedId,
+              )?.id ||
+              next.images.find((item) => item.folderId === selectedId)?.id ||
+              null;
         const summary = next.images.find((item) => item.id === id);
         const image = !id
           ? null
@@ -79,7 +102,7 @@ export function useContent(beforeChange: () => void) {
           generation.current === startedGeneration &&
           generation.current === saved.current
         )
-          install(next, image);
+          install(next, image, selectedId);
       } catch (e) {
         if (live && epoch.current === startedAt) setError((e as Error).message);
       } finally {
@@ -178,11 +201,11 @@ export function useContent(beforeChange: () => void) {
     [runAction, install],
   );
   const add = useCallback(
-    (svg: TextFile) =>
+    (svg: TextFile, folderId: string) =>
       runAction(async () => {
         const result = await api<OpenResult>("/images", {
           method: "POST",
-          body: JSON.stringify({ svg }),
+          body: JSON.stringify({ svg, folderId }),
         });
         install(result.gallery, result.image);
       }),
@@ -210,10 +233,11 @@ export function useContent(beforeChange: () => void) {
           method: "DELETE",
           body: JSON.stringify({ revision: image.revision }),
         });
-        const next = result.gallery.activeImageId
-          ? await api<Content>(`/images/${result.gallery.activeImageId}`)
-          : null;
-        install(result.gallery, next);
+        const nextId = result.gallery.images.find(
+          (item) => item.folderId === image.folderId,
+        )?.id;
+        const next = nextId ? await api<Content>(`/images/${nextId}`) : null;
+        install(result.gallery, next, image.folderId);
       }),
     [runAction, install],
   );
@@ -225,6 +249,65 @@ export function useContent(beforeChange: () => void) {
         const result = await api<SaveResult>(`/images/${image.id}`, {
           method: "PATCH",
           body: JSON.stringify({ revision: image.revision, locked }),
+        });
+        install(result.gallery, { ...image, ...result.image });
+      }),
+    [runAction, install],
+  );
+  const openFolder = useCallback(
+    (id: string) =>
+      runAction(async () => {
+        const result = await api<OpenResult>(`/folders/${id}/open`, {
+          method: "POST",
+        });
+        install(result.gallery, result.image, id);
+      }),
+    [runAction, install],
+  );
+  const createFolder = useCallback(
+    (input: FolderInput) =>
+      runAction(async () => {
+        const result = await api<OpenResult>("/folders", {
+          method: "POST",
+          body: JSON.stringify(input),
+        });
+        install(result.gallery, result.image);
+      }),
+    [runAction, install],
+  );
+  const editFolder = useCallback(
+    (id: string, revision: number, input: FolderInput) =>
+      runAction(async () => {
+        const result = await api<{ gallery: Gallery }>(`/folders/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ ...input, revision }),
+        });
+        install(result.gallery, current.current, selectedFolder.current);
+      }),
+    [runAction, install],
+  );
+  const deleteFolder = useCallback(
+    (id: string, revision: number) =>
+      runAction(async () => {
+        const result = await api<{ gallery: Gallery }>(`/folders/${id}`, {
+          method: "DELETE",
+          body: JSON.stringify({ revision }),
+        });
+        const next = result.gallery.activeImageId
+          ? await api<Content>(`/images/${result.gallery.activeImageId}`)
+          : null;
+        install(result.gallery, next);
+      }),
+    [runAction, install],
+  );
+  const move = useCallback(
+    (folderId: string) =>
+      runAction(async () => {
+        const image = current.current;
+        if (!image) return;
+        const result = await api<SaveResult>(`/images/${image.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ revision: image.revision, folderId }),
         });
         install(result.gallery, { ...image, ...result.image });
       }),
@@ -275,6 +358,7 @@ export function useContent(beforeChange: () => void) {
   return {
     content,
     gallery,
+    folderId,
     update,
     flush,
     status,
@@ -286,5 +370,10 @@ export function useContent(beforeChange: () => void) {
     rename,
     remove,
     setLocked,
+    openFolder,
+    createFolder,
+    editFolder,
+    deleteFolder,
+    move,
   };
 }
