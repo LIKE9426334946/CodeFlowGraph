@@ -12,16 +12,22 @@ import {
 } from "lucide-react";
 import type { Content, FolderInput, Gallery } from "../types";
 
+const imageNameOrder = new Intl.Collator("zh-CN", {
+  numeric: true,
+  sensitivity: "base",
+});
+
 type Props = {
   gallery: Gallery;
   folderId: string | null;
+  folderCollapsed: boolean;
   current: Content | null;
   admin: boolean;
   onOpen: (id: string) => Promise<void>;
   onAdd: () => void;
   onRename: (name: string) => Promise<void>;
   onDelete: () => Promise<void>;
-  onOpenFolder: (id: string) => Promise<void>;
+  onToggleFolder: (id: string) => Promise<void>;
   onCreateFolder: (input: FolderInput) => Promise<void>;
   onEditFolder: (
     id: string,
@@ -35,13 +41,14 @@ type FolderDraft = FolderInput & { id?: string; revision?: number };
 export function ImageLibrary({
   gallery,
   folderId,
+  folderCollapsed,
   current,
   admin,
   onOpen,
   onAdd,
   onRename,
   onDelete,
-  onOpenFolder,
+  onToggleFolder,
   onCreateFolder,
   onEditFolder,
   onDeleteFolder,
@@ -136,20 +143,21 @@ export function ImageLibrary({
       )}
       <nav className="folder-list" aria-label="目录列表">
         {gallery.folders.map((folder) => {
-          const images = gallery.images.filter(
-            (image) => image.folderId === folder.id,
-          );
+          const images = gallery.images
+            .filter((image) => image.folderId === folder.id)
+            .sort((a, b) => imageNameOrder.compare(a.name, b.name));
           const active = folder.id === folderId;
+          const expanded = active && !folderCollapsed;
           return (
             <div className="folder-group" key={folder.id}>
               <button
                 className={`folder-item ${active ? "selected" : ""}`}
                 aria-label={`打开目录：${folder.name}`}
-                aria-expanded={active}
-                title={folder.name}
-                onClick={() => void onOpenFolder(folder.id).catch(() => {})}
+                aria-expanded={expanded}
+                title={`${expanded ? "折叠" : "展开"}目录：${folder.name}`}
+                onClick={() => void onToggleFolder(folder.id).catch(() => {})}
               >
-                {active ? (
+                {expanded ? (
                   <ChevronDown size={15} />
                 ) : (
                   <ChevronRight size={15} />
@@ -157,7 +165,7 @@ export function ImageLibrary({
                 <span>{folder.name}</span>
                 <small>{images.length}</small>
               </button>
-              {active && (
+              {expanded && (
                 <div className="folder-content">
                   {folder.description && (
                     <p className="folder-description">{folder.description}</p>

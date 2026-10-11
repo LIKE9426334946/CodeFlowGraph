@@ -33,6 +33,15 @@ export default function App() {
   const [message, setMessage] = useState(""),
     [uploading, setUploading] = useState(false),
     [sidebarHidden, setSidebarHidden] = useState(false);
+  const [collapsedFolderId, setCollapsedFolderId] = useState<string | null>(null);
+  const toggleFolder = async (id: string) => {
+    if (id === folderId) {
+      setCollapsedFolderId((collapsed) => (collapsed === id ? null : id));
+      return;
+    }
+    await openFolder(id);
+    setCollapsedFolderId(null);
+  };
   const svgInput = useRef<HTMLInputElement>(null);
   const uploadSvg = async (file?: File) => {
     if (!file) return;
@@ -140,13 +149,14 @@ export default function App() {
               <ImageLibrary
                 gallery={gallery}
                 folderId={folderId}
+                folderCollapsed={collapsedFolderId === folderId}
                 current={content}
                 admin={admin}
                 onOpen={open}
                 onAdd={() => svgInput.current?.click()}
                 onRename={rename}
                 onDelete={remove}
-                onOpenFolder={openFolder}
+                onToggleFolder={toggleFolder}
                 onCreateFolder={createFolder}
                 onEditFolder={editFolder}
                 onDeleteFolder={deleteFolder}
