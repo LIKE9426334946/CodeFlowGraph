@@ -170,6 +170,7 @@ const imageSummary = ({
   folderId,
   name,
   locked,
+  reviewed,
   revision,
   createdAt,
   updatedAt,
@@ -179,6 +180,7 @@ const imageSummary = ({
   folderId,
   name,
   locked,
+  reviewed,
   revision,
   createdAt,
   updatedAt,
@@ -226,10 +228,11 @@ export function createStore(dataDir) {
       const gallery = await readJSON(metadataPath);
       if (![4, 5].includes(gallery.schemaVersion))
         throw new Error("不支持的图片库版本");
-      // Existing galleries predate label locking; keep those images editable.
+      // Older galleries have no lock/review fields; preserve their defaults.
       gallery.images = gallery.images.map((image) => ({
         ...image,
         locked: image.locked === true,
+        reviewed: image.reviewed === true,
       }));
       if (gallery.schemaVersion === 4) {
         // Keep the pre-folder metadata before atomically migrating it.
@@ -296,6 +299,7 @@ export function createStore(dataDir) {
           ),
           revision: 1,
           locked: false,
+          reviewed: false,
           svg: await saveSvg(validateFile(old.svg)),
           labels: validateLabels(old.labels || []),
           createdAt: old.updatedAt || now,
@@ -496,6 +500,7 @@ export function createStore(dataDir) {
           name,
           revision: 1,
           locked: false,
+          reviewed: false,
           svg: await saveSvg(svg),
           labels,
           createdAt: now,
@@ -532,20 +537,30 @@ export function createStore(dataDir) {
         if (
           Object.keys(input).some(
             (key) =>
-              !["revision", "name", "labels", "locked", "folderId"].includes(
-                key,
-              ),
+              ![
+                "revision",
+                "name",
+                "labels",
+                "locked",
+                "reviewed",
+                "folderId",
+              ].includes(key),
           )
         )
           throw new HttpError(
             400,
-            "仅支持修改图片名称、标签、锁定状态和所属目录",
+            "仅支持修改图片名称、标签、锁定状态、复习状态和所属目录",
           );
         const folderId = Object.hasOwn(input, "folderId")
           ? findFolder(old, input.folderId).id
           : image.folderId;
         if (Object.hasOwn(input, "locked") && typeof input.locked !== "boolean")
           throw new HttpError(400, "图片锁定状态需要为布尔值");
+        if (
+          Object.hasOwn(input, "reviewed") &&
+          typeof input.reviewed !== "boolean"
+        )
+          throw new HttpError(400, "图片复习状态需要为布尔值");
         // Unlock separately before changing labels, including from stale pages.
         if (image.locked && Object.hasOwn(input, "labels"))
           throw new HttpError(409, "图片已锁定，请先解锁图片再修改标签");
@@ -553,6 +568,7 @@ export function createStore(dataDir) {
           ...image,
           folderId,
           locked: input.locked ?? image.locked,
+          reviewed: input.reviewed ?? image.reviewed,
           name: Object.hasOwn(input, "name")
             ? validateName(input.name)
             : image.name,

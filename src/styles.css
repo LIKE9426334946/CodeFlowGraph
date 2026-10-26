@@ -222,6 +222,42 @@ svg {
   border-color: #d8cff6;
   background: #f0ecfb;
 }
+.review-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.review-toggle input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: #4d8062;
+}
+.review-toggle.checked {
+  background: #edf7ef;
+  color: #3d7151;
+  border-color: #c9dfce;
+}
+.review-toggle:hover:not(.disabled) {
+  background: #e2f0e6;
+}
+.review-toggle:focus-within {
+  outline: 2px solid #79aa89;
+  outline-offset: -2px;
+}
+.review-toggle.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .toolbar-actions {
   display: flex;
   flex-direction: column;
@@ -547,6 +583,20 @@ svg {
 .image-item.selected {
   background: #eeebfb;
   color: var(--accent);
+}
+.image-item.reviewed {
+  background: #edf7ef;
+  color: #3d7151;
+}
+.image-item.reviewed.selected {
+  background: #e2f1e6;
+  box-shadow: inset 3px 0 #79aa89;
+}
+.image-item.reviewed:hover:not(:disabled) {
+  background: #e2f0e6;
+}
+.reviewed-mark {
+  margin-left: auto;
 }
 .library-empty {
   font-size: 12px;

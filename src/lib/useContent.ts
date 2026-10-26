@@ -264,6 +264,19 @@ export function useContent(beforeChange: () => void) {
       }),
     [runAction, install],
   );
+  const setReviewed = useCallback(
+    (reviewed: boolean) =>
+      runAction(async () => {
+        const image = current.current;
+        if (!image) return;
+        const result = await api<SaveResult>(`/images/${image.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ revision: image.revision, reviewed }),
+        });
+        install(result.gallery, { ...image, ...result.image });
+      }),
+    [runAction, install],
+  );
   const createFolder = useCallback(
     (input: FolderInput) =>
       runAction(async () => {
@@ -370,6 +383,7 @@ export function useContent(beforeChange: () => void) {
     rename,
     remove,
     setLocked,
+    setReviewed,
     openFolder,
     createFolder,
     editFolder,

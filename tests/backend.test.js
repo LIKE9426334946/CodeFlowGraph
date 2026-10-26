@@ -23,6 +23,80 @@ const label = {
   fontSize: 18,
 };
 
+test("review marks survive restart and metadata edits without changing SVGs, labels or locks", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "cfg-image-review-"));
+  try {
+    const initial = createStore(dir);
+    const folderId = (await initial.createFolder({ name: "复习目录" })).gallery
+      .activeFolderId;
+    const { image: a } = await initial.create({
+      folderId,
+      svg: { name: "01.svg", content: svg },
+      labels: [label],
+    });
+    const { image: b } = await initial.create({
+      folderId,
+      svg: { name: "02.svg", content: svg },
+    });
+    assert.equal(a.reviewed, false);
+    assert.equal(b.reviewed, false);
+    await initial.save(a.id, { revision: a.revision, locked: true });
+    const file = path.join(dir, "gallery.json");
+    const legacy = JSON.parse(await readFile(file, "utf8"));
+    legacy.images.forEach((image) => {
+      delete image.reviewed;
+    });
+    await writeFile(file, JSON.stringify(legacy));
+    const store = createStore(dir);
+    assert.equal((await store.read(a.id)).reviewed, false);
+    assert.ok(
+      (await store.list()).images.every((image) => image.reviewed === false),
+    );
+    for (const reviewed of [null, 1, "true"])
+      await assert.rejects(store.save(a.id, { revision: 2, reviewed }), {
+        status: 400,
+      });
+    const marked = await store.save(a.id, { revision: 2, reviewed: true });
+    assert.equal(marked.image.reviewed, true);
+    assert.equal(
+      marked.gallery.images.find((image) => image.id === a.id).reviewed,
+      true,
+    );
+    assert.equal(
+      JSON.parse(await readFile(file, "utf8")).images.find(
+        (image) => image.id === a.id,
+      ).reviewed,
+      true,
+    );
+    await assert.rejects(store.save(a.id, { revision: 2, reviewed: false }), {
+      status: 409,
+    });
+    const otherFolderId = (await store.createFolder({ name: "已学习" })).gallery
+      .activeFolderId;
+    await store.save(a.id, {
+      revision: marked.image.revision,
+      name: "01-已学习",
+      folderId: otherFolderId,
+    });
+    const restarted = createStore(dir);
+    const restored = await restarted.read(a.id);
+    assert.equal(restored.reviewed, true);
+    assert.equal(restored.locked, true);
+    assert.equal(restored.folderId, otherFolderId);
+    assert.equal(restored.svg.content, svg);
+    assert.deepEqual(restored.labels, [label]);
+    assert.equal((await restarted.read(b.id)).reviewed, false);
+    await restarted.save(a.id, {
+      revision: restored.revision,
+      reviewed: false,
+    });
+    assert.equal((await createStore(dir).read(a.id)).reviewed, false);
+    assert.deepEqual((await createStore(dir).read(a.id)).labels, [label]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("image locks survive restart and reject all label writes until explicitly unlocked", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "cfg-image-lock-"));
   try {

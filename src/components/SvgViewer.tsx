@@ -46,6 +46,8 @@ type Props = {
   name?: string;
   labels: SvgLabel[];
   imageLocked: boolean;
+  reviewed: boolean;
+  onReviewChange: (reviewed: boolean) => Promise<void>;
   onImageLockChange: (locked: boolean) => Promise<void>;
   onLabelsChange: (labels: SvgLabel[]) => void;
   onEditingChange: (editing: boolean) => void;
@@ -65,6 +67,8 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     name,
     labels,
     imageLocked,
+    reviewed,
+    onReviewChange,
     onImageLockChange,
     onLabelsChange,
     onEditingChange,
@@ -763,37 +767,58 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
             <Plus size={18} />
           </button>
         </div>
-        <button
-          className={`button zoom-lock ${zoomLocked ? "active" : ""}`}
-          disabled={!svg}
-          aria-label={zoomLocked ? "解除固定缩放" : "固定缩放"}
-          title={zoomLocked ? "解除固定缩放" : "固定当前缩放比例"}
-          aria-pressed={zoomLocked}
-          onClick={() => controls.current?.setLocked(!zoomLocked)}
-        >
-          {zoomLocked ? <Lock size={17} /> : <Unlock size={17} />}
-          <span>{zoomLocked ? "解除固定缩放" : "固定缩放"}</span>
-        </button>
-        <button
-          className="button fit-button"
-          disabled={!svg || zoomLocked}
-          aria-label="适应宽度"
-          title="适应宽度"
-          onClick={() => controls.current?.fit()}
-        >
-          <Scan size={17} />
-          <span>适应宽度</span>
-        </button>
-        {document.fullscreenEnabled && (
-          <button
-            className="button fullscreen-button"
-            aria-label={fullscreen ? "退出浏览器全屏" : "进入浏览器全屏"}
-            title={fullscreen ? "退出浏览器全屏" : "进入浏览器全屏"}
-            onClick={() => void toggleFullscreen()}
+        {admin ? (
+          <>
+            <button
+              className={`button zoom-lock ${zoomLocked ? "active" : ""}`}
+              disabled={!svg}
+              aria-label={zoomLocked ? "解除固定缩放" : "固定缩放"}
+              title={zoomLocked ? "解除固定缩放" : "固定当前缩放比例"}
+              aria-pressed={zoomLocked}
+              onClick={() => controls.current?.setLocked(!zoomLocked)}
+            >
+              {zoomLocked ? <Lock size={17} /> : <Unlock size={17} />}
+              <span>{zoomLocked ? "解除固定缩放" : "固定缩放"}</span>
+            </button>
+            <button
+              className="button fit-button"
+              disabled={!svg || zoomLocked}
+              aria-label="适应宽度"
+              title="适应宽度"
+              onClick={() => controls.current?.fit()}
+            >
+              <Scan size={17} />
+              <span>适应宽度</span>
+            </button>
+            {document.fullscreenEnabled && (
+              <button
+                className="button fullscreen-button"
+                aria-label={fullscreen ? "退出浏览器全屏" : "进入浏览器全屏"}
+                title={fullscreen ? "退出浏览器全屏" : "进入浏览器全屏"}
+                onClick={() => void toggleFullscreen()}
+              >
+                {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+                <span>{fullscreen ? "退出全屏" : "浏览器全屏"}</span>
+              </button>
+            )}
+          </>
+        ) : (
+          <label
+            className={`review-toggle ${reviewed ? "checked" : ""} ${!svg ? "disabled" : ""}`}
+            title={
+              reviewed ? "取消这张图片的已复习标记" : "将这张图片标记为已复习"
+            }
           >
-            {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-            <span>{fullscreen ? "退出全屏" : "浏览器全屏"}</span>
-          </button>
+            <input
+              type="checkbox"
+              checked={reviewed}
+              disabled={!svg}
+              onChange={(event) =>
+                void onReviewChange(event.target.checked).catch(() => {})
+              }
+            />
+            <span>已复习</span>
+          </label>
         )}
         <div className="toolbar-actions">{actions}</div>
       </aside>

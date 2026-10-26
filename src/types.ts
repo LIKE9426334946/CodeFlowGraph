@@ -4,6 +4,7 @@ export type Content = {
   folderId: string;
   name: string;
   locked: boolean;
+  reviewed: boolean;
   revision: number;
   createdAt: string;
   updatedAt: string;

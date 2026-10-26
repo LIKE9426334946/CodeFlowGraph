@@ -24,6 +24,7 @@ export default function App() {
     rename,
     remove,
     setLocked,
+    setReviewed,
     openFolder,
     createFolder,
     editFolder,
@@ -134,6 +135,8 @@ export default function App() {
             name={content?.name}
             labels={content?.labels || []}
             imageLocked={content?.locked || false}
+            reviewed={content?.reviewed || false}
+            onReviewChange={setReviewed}
             onImageLockChange={setLocked}
             onLabelsChange={(labels) => {
               if (admin && !content?.locked) update(labels);

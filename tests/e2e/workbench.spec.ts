@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 test.describe("fixed zoom", () => {
   test.use({ hasTouch: true, viewport: { width: 1180, height: 820 } });
-  for (const route of ["/", "/admin"]) {
+  for (const route of ["/admin"]) {
     test(`${route} locks every zoom input while preserving pan and unlocks correctly`, async ({
       page,
     }) => {

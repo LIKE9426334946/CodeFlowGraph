@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   FolderPlus,
@@ -174,8 +175,8 @@ export function ImageLibrary({
                     {images.map((image) => (
                       <button
                         key={image.id}
-                        className={`image-item ${image.id === current?.id ? "selected" : ""}`}
-                        title={`${image.name} · ${image.labelCount} 个标签${image.locked ? " · 已锁定" : ""}`}
+                        className={`image-item ${image.id === current?.id ? "selected" : ""} ${image.reviewed ? "reviewed" : ""}`}
+                        title={`${image.name} · ${image.labelCount} 个标签${image.locked ? " · 已锁定" : ""}${image.reviewed ? " · 已复习" : ""}`}
                         aria-label={`打开图片：${image.name}`}
                         aria-pressed={image.id === current?.id}
                         onClick={() => void onOpen(image.id).catch(() => {})}
@@ -186,6 +187,13 @@ export function ImageLibrary({
                           <Image size={15} />
                         )}
                         <span>{image.name}</span>
+                        {image.reviewed && (
+                          <Check
+                            size={14}
+                            className="reviewed-mark"
+                            aria-label="已复习"
+                          />
+                        )}
                       </button>
                     ))}
                     {!images.length && (
