@@ -10,8 +10,9 @@ export type Content = {
   updatedAt: string;
   svg: TextFile;
   labels: SvgLabel[];
+  code: string;
 };
-export type ImageSummary = Omit<Content, "svg" | "labels"> & {
+export type ImageSummary = Omit<Content, "svg" | "labels" | "code"> & {
   labelCount: number;
 };
 export type Gallery = {

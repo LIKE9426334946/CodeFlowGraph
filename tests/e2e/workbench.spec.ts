@@ -525,8 +525,11 @@ test("admin supports create/edit/drag/zoom/sync/delete labels without rebuilding
   await page.getByRole("button", { name: "适应宽度" }).click();
   await expect(page.locator(".cm-editor")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: /代码|分屏|上传/ }),
+    page.getByRole("button", { name: /分屏|上传/ }),
   ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "增加代码", exact: true }),
+  ).toBeVisible();
   await page.locator("#display-svg").evaluate((e) => {
     (window as any).drawingBefore = e;
   });

@@ -26,6 +26,7 @@ export function useContent(beforeChange: () => void) {
   const generation = useRef(0),
     saved = useRef(0),
     epoch = useRef(0);
+  const changed = useRef({ labels: 0, code: 0 });
   const flight = useRef<Promise<void> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const editing = useRef(false),
@@ -44,6 +45,7 @@ export function useContent(beforeChange: () => void) {
       selectedFolder.current = selectedId;
       setFolderId(selectedId);
       generation.current = saved.current = 0;
+      changed.current = { labels: 0, code: 0 };
       editing.current = false;
       setContent(image);
       setCatalog(next);
@@ -126,7 +128,19 @@ export function useContent(beforeChange: () => void) {
   const update = useCallback((labels: SvgLabel[]) => {
     if (!current.current || current.current.locked) return;
     current.current = { ...current.current, labels };
-    generation.current++;
+    changed.current.labels = ++generation.current;
+    setContent(current.current);
+    setStatus("pending");
+  }, []);
+  const updateCode = useCallback((code: string) => {
+    if (
+      !current.current ||
+      current.current.locked ||
+      current.current.code === code
+    )
+      return;
+    current.current = { ...current.current, code };
+    changed.current.code = ++generation.current;
     setContent(current.current);
     setStatus("pending");
   }, []);
@@ -145,7 +159,12 @@ export function useContent(beforeChange: () => void) {
             method: "PATCH",
             body: JSON.stringify({
               revision: snapshot.revision,
-              labels: snapshot.labels,
+              ...(changed.current.labels > saved.current
+                ? { labels: snapshot.labels }
+                : {}),
+              ...(changed.current.code > saved.current
+                ? { code: snapshot.code }
+                : {}),
             }),
           });
           current.current = { ...current.current, ...result.image };
@@ -373,6 +392,7 @@ export function useContent(beforeChange: () => void) {
     gallery,
     folderId,
     update,
+    updateCode,
     flush,
     status,
     error,

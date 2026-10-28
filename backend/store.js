@@ -42,6 +42,13 @@ function validateFile(file) {
   return { name: file.name, content: file.content };
 }
 
+function validateCode(code) {
+  if (typeof code !== "string" || code.length > 200_000)
+    throw new HttpError(400, "代码需要为文本，且不能超过 200000 个字符");
+  // Whitespace is source content: preserve indentation, tabs and blank lines.
+  return code;
+}
+
 function validateLabels(labels) {
   if (!Array.isArray(labels) || labels.length > 1000)
     throw new HttpError(400, "标签数量不能超过 1000 个");
@@ -233,6 +240,7 @@ export function createStore(dataDir) {
         ...image,
         locked: image.locked === true,
         reviewed: image.reviewed === true,
+        code: typeof image.code === "string" ? image.code : "",
       }));
       if (gallery.schemaVersion === 4) {
         // Keep the pre-folder metadata before atomically migrating it.
@@ -302,6 +310,7 @@ export function createStore(dataDir) {
           reviewed: false,
           svg: await saveSvg(validateFile(old.svg)),
           labels: validateLabels(old.labels || []),
+          code: "",
           createdAt: old.updatedAt || now,
           updatedAt: now,
         }
@@ -359,7 +368,7 @@ export function createStore(dataDir) {
     if (input?.revision !== image.revision)
       throw new HttpError(
         409,
-        "这张图片已在其他页面更新，本页修改暂未保存。请保留标签文字后刷新，再继续编辑。",
+        "这张图片已在其他页面更新，本页修改暂未保存。请保留标签文字和代码后刷新，再继续编辑。",
       );
   };
   async function commit(old, patch) {
@@ -493,6 +502,7 @@ export function createStore(dataDir) {
             (svg.name.replace(/\.svg$/i, "").trim() || "未命名图片"),
         );
         const labels = validateLabels(input?.labels ?? []),
+          code = validateCode(input?.code === undefined ? "" : input.code),
           now = new Date().toISOString();
         const image = {
           id: randomUUID(),
@@ -503,6 +513,7 @@ export function createStore(dataDir) {
           reviewed: false,
           svg: await saveSvg(svg),
           labels,
+          code,
           createdAt: now,
           updatedAt: now,
         };
@@ -541,6 +552,7 @@ export function createStore(dataDir) {
                 "revision",
                 "name",
                 "labels",
+                "code",
                 "locked",
                 "reviewed",
                 "folderId",
@@ -549,7 +561,7 @@ export function createStore(dataDir) {
         )
           throw new HttpError(
             400,
-            "仅支持修改图片名称、标签、锁定状态、复习状态和所属目录",
+            "仅支持修改图片名称、标签、代码、锁定状态、复习状态和所属目录",
           );
         const folderId = Object.hasOwn(input, "folderId")
           ? findFolder(old, input.folderId).id
@@ -561,9 +573,12 @@ export function createStore(dataDir) {
           typeof input.reviewed !== "boolean"
         )
           throw new HttpError(400, "图片复习状态需要为布尔值");
-        // Unlock separately before changing labels, including from stale pages.
-        if (image.locked && Object.hasOwn(input, "labels"))
-          throw new HttpError(409, "图片已锁定，请先解锁图片再修改标签");
+        // Unlock separately before changing annotations, including from stale pages.
+        if (
+          image.locked &&
+          (Object.hasOwn(input, "labels") || Object.hasOwn(input, "code"))
+        )
+          throw new HttpError(409, "图片已锁定，请先解锁图片再修改标签或代码");
         const updated = {
           ...image,
           folderId,
@@ -575,6 +590,9 @@ export function createStore(dataDir) {
           labels: Object.hasOwn(input, "labels")
             ? validateLabels(input.labels)
             : image.labels,
+          code: Object.hasOwn(input, "code")
+            ? validateCode(input.code)
+            : image.code,
           revision: image.revision + 1,
           updatedAt: new Date().toISOString(),
         };

@@ -71,6 +71,7 @@ svg {
   position: relative;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 .viewer-tools {
@@ -89,6 +90,106 @@ svg {
 }
 .svg-viewer.sidebar-hidden {
   grid-template-columns: minmax(0, 1fr);
+}
+.svg-viewer.has-code {
+  grid-template-columns: var(--sidebar-width) minmax(0, 4fr) minmax(0, 6fr);
+}
+.svg-viewer.has-code.sidebar-hidden {
+  grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
+}
+.code-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fafbfc;
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+}
+.code-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 48px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: white;
+}
+.code-heading strong {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+}
+.code-heading .icon-button {
+  width: 36px;
+}
+.sidebar-hidden .code-heading {
+  padding-left: 50px;
+}
+.code-scroll,
+.code-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+.code-scroll pre,
+.code-input {
+  margin: 0;
+  padding: 16px;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  tab-size: 4;
+  font:
+    13px/1.65 Consolas,
+    "SFMono-Regular",
+    Menlo,
+    "Liberation Mono",
+    monospace;
+  text-align: left;
+}
+.code-scroll pre {
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+}
+.code-scroll code {
+  font: inherit;
+}
+.code-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.code-input {
+  display: block;
+  width: 100%;
+  resize: none;
+  border: 0;
+  color: inherit;
+  background: #fafbfc;
+  outline-offset: -2px;
+}
+.code-actions {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--line);
+  background: white;
+}
+.code-actions .button {
+  flex: 1;
+  padding: 0 8px;
+  font-size: 12px;
 }
 .viewer-tools[hidden] {
   display: none;
@@ -180,7 +281,8 @@ svg {
   font-size: 12px;
   min-width: 0;
 }
-.add-label {
+.add-label,
+.add-code {
   color: var(--accent);
   border-color: #e5dff9;
   background: #f6f3ff;
@@ -731,6 +833,7 @@ svg {
     width: 40px;
   }
   .viewer-tools .library-add > span,
+  .viewer-tools .add-code > span,
   .viewer-tools .zoom-lock > span,
   .viewer-tools .image-lock > span {
     display: inline;

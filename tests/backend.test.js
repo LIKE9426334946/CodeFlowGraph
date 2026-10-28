@@ -231,7 +231,7 @@ test("gallery API persists independently named images and labels, remembers sele
       { labels: [label, label] },
       { labels: [{ ...label, x: null }] },
       { name: " " },
-      { code: "removed" },
+      { unknownField: "unsupported" },
     ])
       assert.equal(
         (await request(`/images/${a.id}`, "PATCH", { revision: 2, ...patch }))

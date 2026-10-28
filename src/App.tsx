@@ -14,6 +14,7 @@ export default function App() {
     gallery,
     folderId,
     update,
+    updateCode,
     flush,
     status,
     error,
@@ -134,6 +135,8 @@ export default function App() {
             svg={content?.svg || null}
             name={content?.name}
             labels={content?.labels || []}
+            code={content?.code || ""}
+            onCodeChange={updateCode}
             imageLocked={content?.locked || false}
             reviewed={content?.reviewed || false}
             onReviewChange={setReviewed}

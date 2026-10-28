@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  Code2,
   Image,
   Lock,
   Maximize,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import type { Camera, SvgLabel, TextFile } from "../types";
 import { clientToSvg, parseSvg, svgElement } from "../lib/svg";
+import { CodePanel } from "./CodePanel";
 
 type Controls = {
   zoom: (factor: number) => void;
@@ -45,6 +47,8 @@ type Props = {
   svg: TextFile | null;
   name?: string;
   labels: SvgLabel[];
+  code: string;
+  onCodeChange: (code: string) => void;
   imageLocked: boolean;
   reviewed: boolean;
   onReviewChange: (reviewed: boolean) => Promise<void>;
@@ -66,6 +70,8 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     svg,
     name,
     labels,
+    code,
+    onCodeChange,
     imageLocked,
     reviewed,
     onReviewChange,
@@ -93,6 +99,8 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
   const [editor, setEditor] = useState<Editor | null>(null),
     [fullscreen, setFullscreen] = useState(false),
     [zoomLocked, setZoomLocked] = useState(false);
+  const [codeDraft, setCodeDraft] = useState<string | null>(null);
+  const codeEditing = codeDraft !== null;
   const canEditLabels = admin && !imageLocked;
   const latest = useRef({
     canEditLabels,
@@ -101,6 +109,7 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     onEditingChange,
     placing,
     editor,
+    codeEditing,
   });
   latest.current = {
     canEditLabels,
@@ -109,15 +118,17 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     onEditingChange,
     placing,
     editor,
+    codeEditing,
   };
   useEffect(() => {
-    onEditingChange(canEditLabels && (placing || !!editor));
+    onEditingChange(canEditLabels && (placing || !!editor || codeEditing));
     redraw.current?.();
-  }, [labels, placing, editor, onEditingChange, canEditLabels]);
+  }, [labels, placing, editor, codeEditing, onEditingChange, canEditLabels]);
   useEffect(() => {
     if (!canEditLabels) {
       setEditor(null);
       setPlacing(false);
+      setCodeDraft(null);
     }
   }, [canEditLabels]);
   useEffect(() => {
@@ -590,7 +601,10 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       if (!pointers.size) {
         view.classList.remove("dragging");
         latest.current.onEditingChange(
-          opensEditor || !!latest.current.editor || latest.current.placing,
+          opensEditor ||
+            !!latest.current.editor ||
+            latest.current.placing ||
+            latest.current.codeEditing,
         );
       }
     };
@@ -650,11 +664,24 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
       );
     setEditor(null);
   };
+  const saveCode = () => {
+    if (!canEditLabels || codeDraft === null) return;
+    onCodeChange(codeDraft);
+    setCodeDraft(null);
+  };
+  const editCode = () => {
+    if (!canEditLabels || !svg || codeDraft !== null) return;
+    if (editor?.label.text.trim()) saveLabel();
+    else setEditor(null);
+    setPlacing(false);
+    setCodeDraft(code);
+  };
   useImperativeHandle(ref, () => ({
     finishEditing() {
       if (canEditLabels && editor?.label.text.trim()) saveLabel();
       else setEditor(null);
       setPlacing(false);
+      saveCode();
       onEditingChange(false);
     },
   }));
@@ -667,7 +694,9 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
     }
   };
   return (
-    <main className={`svg-viewer ${sidebarHidden ? "sidebar-hidden" : ""}`}>
+    <main
+      className={`svg-viewer ${sidebarHidden ? "sidebar-hidden" : ""} ${svg && (code !== "" || codeDraft !== null) ? "has-code" : ""}`}
+    >
       <button
         className="sidebar-toggle"
         aria-label={sidebarHidden ? "展开侧边栏" : "隐藏侧边栏"}
@@ -708,8 +737,8 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
               aria-label={imageLocked ? "解锁图片" : "锁定图片"}
               title={
                 imageLocked
-                  ? "图片已锁定，解锁后可编辑标签"
-                  : "锁定图片，防止误改标签"
+                  ? "图片已锁定，解锁后可编辑标签和代码"
+                  : "锁定图片，防止误改标签和代码"
               }
               onClick={() =>
                 void onImageLockChange(!imageLocked).catch(() => {})
@@ -732,6 +761,16 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
             >
               <Tag size={17} />
               <span>{placing ? "取消添加" : "添加标签"}</span>
+            </button>
+            <button
+              className="button add-code"
+              disabled={!svg || !canEditLabels || codeDraft !== null}
+              aria-label={code ? "编辑图片代码" : "增加代码"}
+              title={code ? "编辑图片代码" : "增加代码"}
+              onClick={editCode}
+            >
+              <Code2 size={17} />
+              <span>{code ? "编辑代码" : "增加代码"}</span>
             </button>
             <div className="tool-divider" />
           </>
@@ -822,6 +861,20 @@ export const SvgViewer = forwardRef<SvgViewerHandle, Props>(function SvgViewer(
         )}
         <div className="toolbar-actions">{actions}</div>
       </aside>
+      {svg && (code !== "" || codeDraft !== null) && (
+        <CodePanel
+          code={code}
+          draft={codeDraft}
+          canEdit={canEditLabels}
+          onEdit={editCode}
+          onDraftChange={setCodeDraft}
+          onSave={saveCode}
+          onCancel={() => setCodeDraft(null)}
+          onDelete={() => {
+            if (canEditLabels) onCodeChange("");
+          }}
+        />
+      )}
       <div className="viewer-canvas">
         {svg ? (
           <div
